@@ -15,8 +15,10 @@ class Settings(BaseSettings):
 
     # RAG
     RAG_TOP_K: int = 10
-    CHUNK_SIZE: int = 2000
-    CHUNK_OVERLAP: int = 100
+    CHUNK_SIZE: int = 900  # was 2000 — smaller for section-aware splits
+    CHUNK_OVERLAP: int = 50  # was 100 — reduced proportionally
+    CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    ENABLE_RERANKING: bool = True  # set False in tests / offline environments
 
     # Prompt
     PROMPT_VERSION: int = 3

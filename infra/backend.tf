@@ -55,6 +55,28 @@ resource "google_cloud_run_v2_service" "backend" {
       }
 
       env {
+        name  = "ENABLE_RERANKING"
+        value = "true"
+      }
+
+      env {
+        name  = "CROSS_ENCODER_MODEL"
+        value = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+      }
+
+      env {
+        # Informational — index is pre-baked at build time, but documents
+        # what chunk size the running LanceDB index was built with.
+        name  = "CHUNK_SIZE"
+        value = "900"
+      }
+
+      env {
+        name  = "CHUNK_OVERLAP"
+        value = "50"
+      }
+
+      env {
         name  = "PHOENIX_COLLECTOR_ENDPOINT"
         value = "${google_cloud_run_v2_service.phoenix.uri}/v1/traces"
       }

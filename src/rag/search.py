@@ -1,7 +1,23 @@
 import lancedb
+from lancedb.rerankers import CrossEncoderReranker
 
 from src.config import settings
 from src.observability import get_tracer
+
+_RERANKER: CrossEncoderReranker | None = None
+
+
+def _get_reranker() -> CrossEncoderReranker | None:
+    """Return a cached CrossEncoderReranker, or None if reranking is disabled."""
+    global _RERANKER
+    if not settings.ENABLE_RERANKING:
+        return None
+    if _RERANKER is None:
+        _RERANKER = CrossEncoderReranker(
+            model_name=settings.CROSS_ENCODER_MODEL,
+            column="value",  # CRITICAL: LanceDB column is "value" not default "text"
+        )
+    return _RERANKER
 
 
 def hybrid_search(dbtable, query: str, top_k: int | None = None) -> str:
@@ -12,10 +28,21 @@ def hybrid_search(dbtable, query: str, top_k: int | None = None) -> str:
     tracer = get_tracer()
     with tracer.start_as_current_span(
         "rag.hybrid_search",
-        attributes={"openinference.span.kind": "RETRIEVER"},
+        attributes={
+            "openinference.span.kind": "RETRIEVER",
+            "rag.reranking_enabled": settings.ENABLE_RERANKING,
+        },
     ):
         top_k = top_k or settings.RAG_TOP_K
-        query_results = dbtable.search(query, query_type="hybrid").to_pandas()
+        reranker = _get_reranker()
+        if reranker is not None:
+            query_results = (
+                dbtable.search(query, query_type="hybrid")
+                .rerank(reranker=reranker)
+                .to_pandas()
+            )
+        else:
+            query_results = dbtable.search(query, query_type="hybrid").to_pandas()
         results = query_results.sort_values(
             "_relevance_score", ascending=True
         ).nlargest(top_k, "_relevance_score")
@@ -28,12 +55,23 @@ def search_dan_articles(query: str, top_k: int = 3) -> list[dict]:
     tracer = get_tracer()
     with tracer.start_as_current_span(
         "rag.search_dan_articles",
-        attributes={"openinference.span.kind": "RETRIEVER"},
+        attributes={
+            "openinference.span.kind": "RETRIEVER",
+            "rag.reranking_enabled": settings.ENABLE_RERANKING,
+        },
     ):
         try:
             db = lancedb.connect(settings.LANCEDB_URI)
             dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
-            query_results = dbtable.search(query, query_type="hybrid").to_pandas()
+            reranker = _get_reranker()
+            if reranker is not None:
+                query_results = (
+                    dbtable.search(query, query_type="hybrid")
+                    .rerank(reranker=reranker)
+                    .to_pandas()
+                )
+            else:
+                query_results = dbtable.search(query, query_type="hybrid").to_pandas()
             results = query_results.sort_values(
                 "_relevance_score", ascending=True
             ).nlargest(top_k, "_relevance_score")

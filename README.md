@@ -13,6 +13,24 @@
 
 ![Screen Recording 2026-02-17 at 5 14 59 PM](https://github.com/user-attachments/assets/c81ba2e6-4cf5-4e92-8f8e-9ef496a26aa6)
 
+## The story behind it
+
+My diving instructor said this somewhere around dive 30: *"A bad dive is already on the profile."* We were sitting on a boat in between dives, scrolling through profiles on my dive computer, and he pointed at a jagged ascent line. "See that? That diver was stressed. You can read it."
+
+Then somewhere around dive 80, it clicked. The shape of a depth curve tells you whether someone was comfortable or panicking. The slope of an ascent tells you whether they were patient or bolting. The NDL numbers ticking down tell you whether they were flirting with deco. The gas consumption rate tells you whether they were relaxed or breathing like they'd just seen a bull shark.
+
+Any diver with experience will tell you instantly which of these two profiles they'd rather own:
+
+| Dive #1 — the rough one | Dive #2 — the clean one |
+| ----------------------- | ----------------------- |
+| ![Dive #1](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/5d043a91-39bb-4b77-a49c-bd19b82cf04a) | ![Dive #2](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/86bc990c-55e9-4c14-9db9-310b88b3c4bb) |
+
+Dive profiles aren't just squiggly lines. They're stories.
+
+Fast forward to 166 dives logged in Subsurface and tens of thousands of data points sitting untouched on my laptop. The question nagged at me: **what if a computer could read these profiles the way an experienced instructor does?** Not just flagging the obvious stuff — any dive computer can beep at you for ascending too fast. I mean the nuanced stuff: connecting a rapid ascent to the fact that you were low on air, in cold water, with current; pulling up the actual DAN incident report where someone in similar conditions got bent; delivering it with enough personality that you'd actually remember it next time you're at 25 meters watching your NDL drop.
+
+That's DiveRoast.
+
 ## What is this?
 
 DiveRoast analyzes your SCUBA dive logs, identifies safety issues, and delivers personalized safety critiques grounded in real incident reports from [Divers Alert Network (DAN)](https://www.diversalertnetwork.org/). Upload a dive log, get a full safety analysis, learn something.
@@ -129,8 +147,8 @@ Terraform files live in `infra/`, one per concern. See [Article 06](articles/06-
 | `DESTINATION__LANCEDB__EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Embedding model |
 | `DESTINATION__LANCEDB__CREDENTIALS__URI` | `.lancedb` | LanceDB credentials URI |
 | `RAG_TOP_K` | `10` | Number of RAG results to retrieve |
-| `CHUNK_SIZE` | `2000` | Document chunk size for RAG |
-| `CHUNK_OVERLAP` | `100` | Chunk overlap for RAG |
+| `CHUNK_SIZE` | `900` | Document chunk size for RAG |
+| `CHUNK_OVERLAP` | `50` | Chunk overlap for RAG |
 | `PHOENIX_COLLECTOR_ENDPOINT` | `http://localhost:6006/v1/traces` | Phoenix trace collector |
 | `PHOENIX_PROJECT_NAME` | `diveroast` | Phoenix project name |
 

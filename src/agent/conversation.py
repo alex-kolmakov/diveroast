@@ -120,6 +120,31 @@ class DiverRoastAgent:
             return "[]"
         return self.dive_data.to_json()
 
+    def _build_anomaly_keywords(self) -> str:
+        """Build RAG-enriching keywords from objective dive anomalies.
+
+        Thresholds match analyze_dive_profile() for consistency.
+        Note: adverse_conditions (rating < 3) is intentionally excluded —
+        a star rating is subjective and would add noise to RAG queries.
+        """
+        if (
+            not hasattr(self, "features")
+            or self.features is None
+            or self.features.empty
+        ):
+            return ""
+        keywords: list[str] = []
+        f = self.features
+        if f["max_ascend_speed"].max() > 10:
+            keywords.append("rapid ascent decompression sickness")
+        if f["min_ndl"].min() < 1:
+            keywords.append("close to deco stop NDL almost zero recreational limit")
+        if f["sac_rate"].max() > 20:
+            keywords.append("high air consumption SAC rate breathing")
+        if f["max_depth"].max() > 30:
+            keywords.append("deep diving incident")
+        return " ".join(keywords)
+
     def _execute_tool(self, function_call: types.FunctionCall) -> str:
         """Execute a tool function call and return the result."""
         tracer = get_tracer()
@@ -138,6 +163,15 @@ class DiverRoastAgent:
                 "analyze_all_dives",
             ):
                 args["dive_data_json"] = self._get_dive_data_json()
+
+            # Augment RAG queries with objective anomaly keywords so the diver's
+            # actual safety issues surface even when their question is generic.
+            if func_name in ("search_dan_incidents", "search_dan_guidelines"):
+                anomaly_keywords = self._build_anomaly_keywords()
+                if anomaly_keywords:
+                    args["query"] = (
+                        f"{args.get('query', '')} {anomaly_keywords}".strip()
+                    )
 
             func = TOOL_FUNCTIONS.get(func_name)
             if func is None:

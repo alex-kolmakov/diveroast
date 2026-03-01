@@ -42,12 +42,32 @@ def remove_html_tags(text):
     return cleaned_text
 
 
+_DAN_SECTION_SEPARATORS = [
+    "Incident Description",
+    "Contributing Factors",
+    "Lessons Learned",
+    "Recommendations",
+    "What Went Right",
+    "DAN Evaluation",
+    "\n\n",
+    "\n",
+    " ",
+    "",
+]
+
+
 def chunk_text(text, chunk_size=None, chunk_overlap=None):
-    """Split text into chunks using RecursiveCharacterTextSplitter."""
+    """Split text into chunks using RecursiveCharacterTextSplitter.
+
+    DAN section headers are used as preferred split points so that
+    'Contributing Factors' and 'Lessons Learned' don't bleed across chunks.
+    """
     chunk_size = chunk_size or settings.CHUNK_SIZE
     chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=_DAN_SECTION_SEPARATORS,
     )
     return text_splitter.split_text(text)
 

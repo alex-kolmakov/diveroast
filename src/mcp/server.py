@@ -55,6 +55,30 @@ def _filter_dive(df: pd.DataFrame, dive_number: str) -> pd.DataFrame:
     return result
 
 
+def _build_anomaly_keywords() -> str:
+    """Build RAG-enriching keywords from objective dive anomalies in the current session.
+
+    Mirrors DiverRoastAgent._build_anomaly_keywords() — adverse_conditions
+    intentionally excluded (see note in conversation.py).
+    """
+    if _dive_data is None:
+        return ""
+    try:
+        features = extract_features(_dive_data)
+    except Exception:
+        return ""
+    keywords: list[str] = []
+    if features["max_ascend_speed"].max() > 10:
+        keywords.append("rapid ascent decompression sickness")
+    if features["min_ndl"].min() < 1:
+        keywords.append("close to deco stop NDL almost zero recreational limit")
+    if features["sac_rate"].max() > 20:
+        keywords.append("high air consumption SAC rate breathing")
+    if features["max_depth"].max() > 30:
+        keywords.append("deep diving incident")
+    return " ".join(keywords)
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -67,7 +91,9 @@ def search_dan_incidents(query: str) -> str:
     Use this to find real-world incidents where divers experienced problems
     similar to what you see in a dive profile.
     """
-    return retrieve_context(f"diving incident: {query}")
+    anomaly_kw = _build_anomaly_keywords()
+    augmented = f"{query} {anomaly_kw}".strip() if anomaly_kw else query
+    return retrieve_context(f"diving incident: {augmented}")
 
 
 @mcp.tool()
@@ -77,7 +103,9 @@ def search_dan_guidelines(query: str) -> str:
     Use this to find authoritative recommendations on diving safety topics
     like ascent rates, NDL management, air consumption, etc.
     """
-    return retrieve_context(f"diving safety guideline: {query}")
+    anomaly_kw = _build_anomaly_keywords()
+    augmented = f"{query} {anomaly_kw}".strip() if anomaly_kw else query
+    return retrieve_context(f"diving safety guideline: {augmented}")
 
 
 @mcp.tool()
