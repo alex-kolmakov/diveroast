@@ -180,4 +180,5 @@ The pre-commit pipeline runs **ruff** (lint + format), **pyrefly** (type check),
 ## Acknowledgements
 
 Thanks to [#DataTalksClub](https://datatalks.club/) for mentoring and to everyone who taught me to be a better diver!
+
 ![image](https://github.com/user-attachments/assets/52d2ee9e-7a54-49d8-a44b-633aae10f34a)
