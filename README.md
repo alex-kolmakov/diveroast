@@ -13,27 +13,25 @@
 
 ![Screen Recording 2026-02-17 at 5 14 59 PM](https://github.com/user-attachments/assets/c81ba2e6-4cf5-4e92-8f8e-9ef496a26aa6)
 
-## The story behind it
 
-My diving instructor said this somewhere around dive 30: *"A bad dive is already on the profile."* We were sitting on a boat in between dives, scrolling through profiles on my dive computer, and he pointed at a jagged ascent line. "See that? That diver was stressed. You can read it."
+## My story behind it
 
-Then somewhere around dive 80, it clicked. The shape of a depth curve tells you whether someone was comfortable or panicking. The slope of an ascent tells you whether they were patient or bolting. The NDL numbers ticking down tell you whether they were flirting with deco. The gas consumption rate tells you whether they were relaxed or breathing like they'd just seen a bull shark.
+> I started diving in a pretty shallow pool. When I was studing for my first OWD license I was caught off guard by two pictures of diving profiles that my instructor showed me and said: "There are two dives here, but one is clearly worse than the other - can you guess?" And he was right, at the time I could only guess.
 
-Any diver with experience will tell you instantly which of these two profiles they'd rather own:
+Any diver with experience will tell you instantly which of these two dive profiles is a problem (and yes both are mine):
 
 | Dive #1 — the rough one | Dive #2 — the clean one |
 | ----------------------- | ----------------------- |
 | ![Dive #1](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/5d043a91-39bb-4b77-a49c-bd19b82cf04a) | ![Dive #2](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/86bc990c-55e9-4c14-9db9-310b88b3c4bb) |
 
-Dive profiles aren't just squiggly lines. They're stories.
+*Dive profiles aren't just squiggly lines. They can tell a story.*
 
-Fast forward to 166 dives logged in Subsurface and tens of thousands of data points sitting untouched on my laptop. The question nagged at me: **what if a computer could read these profiles the way an experienced instructor does?** Not just flagging the obvious stuff — any dive computer can beep at you for ascending too fast. I mean the nuanced stuff: connecting a rapid ascent to the fact that you were low on air, in cold water, with current; pulling up the actual DAN incident report where someone in similar conditions got bent; delivering it with enough personality that you'd actually remember it next time you're at 25 meters watching your NDL drop.
+**So what a computer could read them the way an experienced instructor does?**
+Not only scolding you for fast ascents(dive computers do that well already), but showing your overall stats, knowing what DAN considers good practice and roasting your bad diving habits so you can improve?
 
-That's DiveRoast.
+**That's DiveRoast.**
 
-## What is this?
-
-DiveRoast analyzes your SCUBA dive logs, identifies safety issues, and delivers personalized safety critiques grounded in real incident reports from [Divers Alert Network (DAN)](https://www.diversalertnetwork.org/). Upload a dive log, get a full safety analysis, learn something.
+It analyzes your SCUBA dive logs, identifies safety issues, and delivers personalized safety critiques grounded in real incident reports from [Divers Alert Network (DAN)](https://www.diversalertnetwork.org/). Upload a dive log, get a full safety analysis, learn something.
 
 - **Agentic analysis** — Gemini with function-calling tools reviews your dives and delivers personalized safety commentary with dry humor
 - **RAG over DAN content** — hybrid search (semantic + full-text) over DAN incident reports and guidelines via LanceDB
@@ -135,22 +133,6 @@ The Gemini API key flows from `.env` → `TF_VAR_gemini_api_key` → Secret Mana
 
 Terraform files live in `infra/`, one per concern. See [Article 06](articles/06-from-localhost-to-cloud-run.md) for the full deployment story.
 
-## Environment Variables
-
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `GEMINI_API_KEY` | — | **Required.** Google Gemini API key |
-| `GEMINI_MODEL` | `gemini-3-flash-preview` | Gemini model to use |
-| `PROMPT_VERSION` | `3` | Active prompt version (1=roast-master, 2=polite-analyst, 3=dry-humor-analyst) |
-| `LANCEDB_URI` | `.lancedb` | Path to LanceDB storage |
-| `DESTINATION__LANCEDB__EMBEDDING_MODEL_PROVIDER` | `sentence-transformers` | Embedding provider |
-| `DESTINATION__LANCEDB__EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Embedding model |
-| `DESTINATION__LANCEDB__CREDENTIALS__URI` | `.lancedb` | LanceDB credentials URI |
-| `RAG_TOP_K` | `10` | Number of RAG results to retrieve |
-| `CHUNK_SIZE` | `900` | Document chunk size for RAG |
-| `CHUNK_OVERLAP` | `50` | Chunk overlap for RAG |
-| `PHOENIX_COLLECTOR_ENDPOINT` | `http://localhost:6006/v1/traces` | Phoenix trace collector |
-| `PHOENIX_PROJECT_NAME` | `diveroast` | Phoenix project name |
 
 ## Project Structure
 
@@ -195,10 +177,7 @@ pre-commit run --all-files
 
 The pre-commit pipeline runs **ruff** (lint + format), **pyrefly** (type check), and **pytest**.
 
-## License
-
-MIT
-
 ## Acknowledgements
 
-Thanks to [#DataTalksClub](https://datatalks.club/) for mentoring and providing a platform to learn during the 2024 Cohort.
+Thanks to [#DataTalksClub](https://datatalks.club/) for mentoring and to everyone who taught me to be a better diver!
+![image](https://github.com/user-attachments/assets/52d2ee9e-7a54-49d8-a44b-633aae10f34a)
