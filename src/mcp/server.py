@@ -13,6 +13,7 @@ for internal use.
 
 import json
 import logging
+from pathlib import Path
 
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
@@ -117,8 +118,16 @@ def parse_dive_log(file_path: str) -> str:
     get_dive_summary on individual dives.
     """
     global _dive_data
-    parser = get_parser(file_path)
-    _dive_data = parser.parse(file_path)
+    # Resolve to absolute path and verify it stays within an allowed location.
+    # This prevents path traversal attacks (e.g. /proc/self/environ on Linux).
+    resolved = Path(file_path).resolve()
+    allowed_roots = [Path.home(), Path("/tmp"), Path("/var/folders")]
+    if not any(str(resolved).startswith(str(root)) for root in allowed_roots):
+        return f"Error: file_path must be within your home directory or /tmp. Got: {resolved}"
+    if not resolved.exists():
+        return f"Error: file not found: {resolved}"
+    parser = get_parser(str(resolved))
+    _dive_data = parser.parse(str(resolved))
     dive_numbers = sorted(_dive_data["dive_number"].unique().tolist())
     return (
         f"Parsed {len(dive_numbers)} dives: {dive_numbers}\n"

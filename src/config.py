@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.0-flash"
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite-preview"
 
     # LanceDB / Embeddings
     LANCEDB_URI: str = ".lancedb"

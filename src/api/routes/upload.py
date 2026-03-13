@@ -20,16 +20,20 @@ async def upload_dive_log(
     donate: bool = Form(default=False),
 ):
     """Upload a dive log file, parse it, and store in the session."""
-    filename = file.filename or "upload.ssrf"
+    # Strip path separators from client-supplied filename to prevent path traversal
+    filename = Path(file.filename or "upload.ssrf").name or "upload.ssrf"
     try:
         parser = get_parser(filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
-    # Write to temp file for parsing
+    # Write to temp file for parsing (50 MB limit matches nginx client_max_body_size)
+    MAX_UPLOAD_BYTES = 50 * 1024 * 1024
     suffix = os.path.splitext(filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
         tmp.write(content)
         tmp_path = tmp.name
 

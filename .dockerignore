@@ -1,0 +1,32 @@
+# Secrets — never bake into image layers
+.env
+.env.*
+*.pem
+credentials.json
+service.json
+
+# Data — mounted as volumes at runtime
+.lancedb/
+.dlt/
+
+# Dev artifacts
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Git / IDE
+.git/
+.vscode/
+.idea/
+
+# Articles and docs not needed in image
+articles/
+documentation/

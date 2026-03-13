@@ -100,6 +100,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -155,5 +156,6 @@ service.json
 *.tfvars
 !terraform.tfvars.example
 infra/.terraform/
-infra/*.tfstate*\ncontacts.yaml
+infra/*.tfstate*
+contacts.yaml
 *.pem
