@@ -3,7 +3,6 @@
 **A conversational agent that roasts your SCUBA diving — backed by real safety data.**
 
 [![CI](https://github.com/alex-kolmakov/diveroast/actions/workflows/ci.yaml/badge.svg)](https://github.com/alex-kolmakov/diveroast/actions/workflows/ci.yaml)
-![Hetzner](https://img.shields.io/badge/Hetzner-VPS-D50C2D?logo=hetzner&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)
 ![dlt](https://img.shields.io/badge/dlt-data%20pipeline-teal)
 ![LanceDB](https://img.shields.io/badge/LanceDB-vectors-white)
