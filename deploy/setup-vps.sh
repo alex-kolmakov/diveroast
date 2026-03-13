@@ -10,7 +10,7 @@ echo "==> Updating system packages"
 apt-get update -q && apt-get upgrade -yq
 
 echo "==> Installing Docker"
-apt-get install -yq ca-certificates curl gnupg
+apt-get install -yq ca-certificates curl gnupg git
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
