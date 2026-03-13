@@ -1,5 +1,7 @@
-# Setup and requirements
-Project requires Docker and docker-compose to start. 
+> **Deprecated:** This document describes the original pipeline architecture from the 2024 LLM Zoomcamp submission (Mage, MLflow, Google Drive). It is kept for historical reference only and does not reflect the current application. For current setup, see the [Quick Start](../README.md#quick-start-docker) in the README.
+
+# Setup and requirements (historical)
+Project requires Docker and docker-compose to start.
 
 Data loading pipeline **will use anonymized data from my dives if the credentials file and folder_id are not available**. This is to ensure that the pipeline can be run without any issues.
 

@@ -1,15 +1,28 @@
 import type { DashboardData, UploadResponse } from "../types";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+async function fetchJSON<T>(url: string, fallback: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || fallback);
+  }
+  return response.json();
+}
 
 export async function uploadDiveLog(
   file: File,
-  sessionId?: string
+  sessionId?: string,
+  donate?: boolean,
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
   if (sessionId) {
     formData.append("session_id", sessionId);
+  }
+  if (donate) {
+    formData.append("donate", "true");
   }
 
   const response = await fetch(`${API_BASE}/api/upload`, {
@@ -25,17 +38,26 @@ export async function uploadDiveLog(
   return response.json();
 }
 
-export async function fetchDashboard(
-  sessionId: string
-): Promise<DashboardData> {
-  const response = await fetch(`${API_BASE}/api/dashboard/${sessionId}`);
+export function fetchDashboard(sessionId: string): Promise<DashboardData> {
+  return fetchJSON<DashboardData>(
+    `${API_BASE}/api/dashboard/${sessionId}`,
+    "Failed to load dashboard"
+  );
+}
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Failed to load dashboard");
-  }
+export function fetchSharedDashboard(shareId: string): Promise<DashboardData> {
+  return fetchJSON<DashboardData>(
+    `${API_BASE}/api/shared/${shareId}`,
+    "Shared results not found"
+  );
+}
 
-  return response.json();
+export async function saveRoastSummary(sessionId: string, roast: string): Promise<void> {
+  await fetch(`${API_BASE}/api/sessions/${sessionId}/roast`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roast }),
+  });
 }
 
 export function createChatStream(

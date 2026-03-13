@@ -94,3 +94,4 @@ class DashboardResponse(BaseModel):
     all_dives: list[DiveFeature]
     top_problematic_dives: list[ProblematicDive]
     diver_profile: DiverProfile
+    roast_summary: str | None = None

@@ -1,10 +1,13 @@
 import os
 import tempfile
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.api.dependencies import get_or_create_session
 from src.api.models import UploadResponse
+from src.config import settings
 from src.parsers import get_parser
 
 router = APIRouter()
@@ -14,6 +17,7 @@ router = APIRouter()
 async def upload_dive_log(
     file: UploadFile = File(...),
     session_id: str = Form(default=None),
+    donate: bool = Form(default=False),
 ):
     """Upload a dive log file, parse it, and store in the session."""
     filename = file.filename or "upload.ssrf"
@@ -37,6 +41,13 @@ async def upload_dive_log(
         ) from None
     finally:
         os.unlink(tmp_path)
+
+    if donate:
+        donations_dir = Path(settings.DONATIONS_DIR)
+        donations_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        donation_path = donations_dir / f"{timestamp}_{filename}"
+        donation_path.write_bytes(content)
 
     sid, agent = get_or_create_session(session_id)
     agent.set_dive_data(df)

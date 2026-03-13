@@ -4,12 +4,14 @@ import Markdown from "react-markdown";
 import type { ChatMessage } from "@/types";
 
 interface Props {
-  messages: ChatMessage[];
-  isLoading: boolean;
+  messages?: ChatMessage[];
+  isLoading?: boolean;
+  staticText?: string | null;
 }
 
-export function AgentRoastSummary({ messages, isLoading }: Props) {
+export function AgentRoastSummary({ messages = [], isLoading = false, staticText }: Props) {
   const firstAssistantMsg = messages.find((m) => m.role === "assistant");
+  const content = staticText ?? firstAssistantMsg?.content;
 
   return (
     <Card>
@@ -20,14 +22,14 @@ export function AgentRoastSummary({ messages, isLoading }: Props) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {isLoading && !firstAssistantMsg?.content ? (
+        {isLoading && !content ? (
           <div className="flex items-center gap-2 text-muted-foreground">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-primary" />
             <span className="text-sm">Generating roast...</span>
           </div>
-        ) : firstAssistantMsg?.content ? (
+        ) : content ? (
           <div className="prose prose-sm prose-invert max-w-none leading-relaxed">
-            <Markdown>{firstAssistantMsg.content}</Markdown>
+            <Markdown>{content}</Markdown>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">

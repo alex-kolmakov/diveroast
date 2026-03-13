@@ -92,4 +92,5 @@ export interface DashboardData {
   all_dives: DiveFeature[];
   top_problematic_dives: ProblematicDive[];
   diver_profile: DiverProfile;
+  roast_summary?: string | null;
 }

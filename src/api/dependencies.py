@@ -1,9 +1,14 @@
 import uuid
 
 from src.agent.conversation import DiverRoastAgent
+from src.config import settings
+from src.storage.snapshots import LocalSnapshotStore, SnapshotStore
 
 # In-memory session store: {session_id: DiverRoastAgent}
 _sessions: dict[str, DiverRoastAgent] = {}
+
+# Singleton snapshot store (lazily initialised)
+_snapshot_store: SnapshotStore | None = None
 
 
 def get_or_create_session(session_id: str | None = None) -> tuple[str, DiverRoastAgent]:
@@ -23,3 +28,11 @@ def get_or_create_session(session_id: str | None = None) -> tuple[str, DiverRoas
 def get_session(session_id: str) -> DiverRoastAgent | None:
     """Get an existing session by ID, or None if not found."""
     return _sessions.get(session_id)
+
+
+def get_snapshot_store() -> SnapshotStore:
+    """Return the singleton snapshot store (local filesystem, backed by Docker volume in prod)."""
+    global _snapshot_store
+    if _snapshot_store is None:
+        _snapshot_store = LocalSnapshotStore(settings.SNAPSHOT_DIR)
+    return _snapshot_store

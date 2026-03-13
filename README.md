@@ -3,8 +3,8 @@
 **A conversational agent that roasts your SCUBA diving — backed by real safety data.**
 
 [![CI](https://github.com/alex-kolmakov/diveroast/actions/workflows/ci.yaml/badge.svg)](https://github.com/alex-kolmakov/diveroast/actions/workflows/ci.yaml)
-![Terraform](https://img.shields.io/badge/Terraform-GCP-844FBA?logo=terraform&logoColor=white)
-![Cloud Run](https://img.shields.io/badge/Cloud%20Run-4285F4?logo=googlecloud&logoColor=white)
+![Hetzner](https://img.shields.io/badge/Hetzner-VPS-D50C2D?logo=hetzner&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)
 ![dlt](https://img.shields.io/badge/dlt-data%20pipeline-teal)
 ![LanceDB](https://img.shields.io/badge/LanceDB-vectors-white)
 ![MCP](https://img.shields.io/badge/MCP-tool%20server-purple)
@@ -95,52 +95,43 @@ DiveRoast exposes its diving tools as an MCP server (stdio transport). Add to yo
 
 Available tools: `search_dan_incidents`, `search_dan_guidelines`, `parse_dive_log`, `analyze_dive_profile`, `get_dive_summary`, `list_dives`, `refresh_dan_data`.
 
-## Cloud Deployment (GCP)
+## Production Deployment (Hetzner VPS)
 
-DiveRoast deploys to **Google Cloud Run** with Terraform. Three services (backend, frontend, Phoenix tracing), managed through three `make` commands:
+DiveRoast runs on a **Hetzner VPS** (cpx22, ~€4.50/mo) with Docker Compose, nginx as an SSL-terminating reverse proxy, and Cloudflare in front for DNS and DDoS protection.
 
 ```bash
-# Prerequisites: gcloud CLI, terraform, docker
-# One-time GCP setup:
-gcloud auth login
-gcloud services enable cloudresourcemanager.googleapis.com serviceusage.googleapis.com
+# On a fresh Debian 12 VPS — run once as root:
+bash deploy/setup-vps.sh
 
-# Configure
-cp infra/terraform.tfvars.example infra/terraform.tfvars
-# Edit terraform.tfvars with your GCP project ID and region
-# Ensure GEMINI_API_KEY is set in .env
+# Place your Cloudflare Origin Certificate at:
+#   /etc/ssl/cloudflare/cert.pem
+#   /etc/ssl/cloudflare/key.pem
 
-# Deploy
-make prepare    # bootstrap infra (APIs, registry, secrets), build & push images
-make deploy     # apply Terraform, deploy all Cloud Run services
+# Configure environment:
+cp .env.prod.sample .env
+# Set GEMINI_API_KEY in .env
 
-# Tear down — verifies nothing billable remains
-make destroy
+# Start everything:
+docker compose -f docker-compose.prod.yml up -d --build
 ```
-
-`make prepare` creates the Artifact Registry and secrets via a targeted Terraform apply, then builds and pushes both Docker images. `make deploy` applies the full Terraform config, then rebuilds the frontend with the real backend URL (Vite bakes `VITE_API_URL` at build time). `make destroy` empties GCS buckets, runs `terraform destroy`, and verifies that all Cloud Run services, buckets, secrets, and repos are actually gone.
-
-The Gemini API key flows from `.env` → `TF_VAR_gemini_api_key` → Secret Manager. It never appears in Terraform state or source control.
 
 **Architecture:**
 
-| Resource | Service | Notes |
-| -------- | ------- | ----- |
-| Cloud Run | `diveroast-backend` | FastAPI + agent + RAG, scale 0-3, 4Gi RAM |
-| Cloud Run | `diveroast-frontend` | Nginx serving Vite build, scale 0-2 |
-| Cloud Run | `diveroast-phoenix` | Arize Phoenix tracing UI, always-on |
-| GCS | Phoenix traces bucket | FUSE-mounted for trace persistence |
-| Artifact Registry | `diveroast` | Docker images for backend + frontend |
-| Secret Manager | `gemini-api-key` | Injected into backend via `secret_key_ref` |
+| Container | Role | Exposed |
+| --------- | ---- | ------- |
+| `nginx` | SSL termination, reverse proxy | 80, 443 |
+| `diveroast-backend` | FastAPI + agent + RAG | internal only |
+| `diveroast-frontend` | React SPA (nginx:alpine) | internal only |
+| `diveroast-phoenix` | Arize Phoenix tracing UI | internal only (SSH tunnel to access) |
 
-Terraform files live in `infra/`, one per concern. See [Article 06](articles/06-from-localhost-to-cloud-run.md) for the full deployment story.
+All data (snapshots, donated dive logs) lives in named Docker volumes — persistent across restarts. Phoenix is not exposed publicly; access it via `ssh -L 6006:localhost:6006 root@<vps-ip>`.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
 | `GEMINI_API_KEY` | — | **Required.** Google Gemini API key |
-| `GEMINI_MODEL` | `gemini-3-flash-preview` | Gemini model to use |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use |
 | `PROMPT_VERSION` | `3` | Active prompt version (1=roast-master, 2=polite-analyst, 3=dry-humor-analyst) |
 | `LANCEDB_URI` | `.lancedb` | Path to LanceDB storage |
 | `DESTINATION__LANCEDB__EMBEDDING_MODEL_PROVIDER` | `sentence-transformers` | Embedding provider |
@@ -151,6 +142,9 @@ Terraform files live in `infra/`, one per concern. See [Article 06](articles/06-
 | `CHUNK_OVERLAP` | `50` | Chunk overlap for RAG |
 | `PHOENIX_COLLECTOR_ENDPOINT` | `http://localhost:6006/v1/traces` | Phoenix trace collector |
 | `PHOENIX_PROJECT_NAME` | `diveroast` | Phoenix project name |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated allowed CORS origins (set to your domain in prod) |
+| `SNAPSHOT_DIR` | `/tmp/diveroast-snapshots` | Path for shared dashboard snapshots (Docker volume in prod) |
+| `DONATIONS_DIR` | `/tmp/diveroast-donations` | Path for donated dive log files (Docker volume in prod) |
 
 ## Project Structure
 

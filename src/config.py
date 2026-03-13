@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: str = "http://localhost:3000"
 
+    # Snapshot storage (backed by Docker named volume in production)
+    SNAPSHOT_DIR: str = "/tmp/diveroast-snapshots"
+
+    # Donated dive log storage
+    DONATIONS_DIR: str = "/tmp/diveroast-donations"
+
     # DAN scraping
     DAN_BASE_URL: str = "https://dan.org/wp-json/wp/v2/"
     DAN_PER_PAGE: int = 100

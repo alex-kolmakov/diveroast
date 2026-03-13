@@ -1,11 +1,11 @@
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from src.agent.gemini_client import get_client
 from src.analysis.feature_engineering import extract_features
-from src.api.dependencies import get_session
+from src.api.dependencies import get_session, get_snapshot_store
 from src.api.models import (
     AggregateStats,
     DashboardResponse,
@@ -16,6 +16,7 @@ from src.api.models import (
     ProblematicDive,
 )
 from src.config import settings
+from src.storage.snapshots import SnapshotStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -370,8 +371,12 @@ def _build_diver_profile(features_df) -> DiverProfile:
 
 
 @router.get("/api/dashboard/{session_id}", response_model=DashboardResponse)
-async def get_dashboard(session_id: str):
-    """Compute dashboard data from session dive data. Pure computation, no LLM calls."""
+async def get_dashboard(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    store: SnapshotStore = Depends(get_snapshot_store),
+):
+    """Compute dashboard data from session dive data. Saves a snapshot for sharing."""
     agent = get_session(session_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -518,7 +523,7 @@ async def get_dashboard(session_id: str):
     # Build diver profile
     diver_profile = _build_diver_profile(features_df)
 
-    return DashboardResponse(
+    response = DashboardResponse(
         session_id=session_id,
         aggregate_stats=aggregate_stats,
         metrics=metrics,
@@ -526,3 +531,8 @@ async def get_dashboard(session_id: str):
         top_problematic_dives=top_problematic_dives,
         diver_profile=diver_profile,
     )
+
+    # Persist snapshot so this session can be shared via /api/shared/{session_id}
+    background_tasks.add_task(store.save, session_id, response)
+
+    return response

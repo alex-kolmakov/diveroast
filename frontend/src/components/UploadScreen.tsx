@@ -11,13 +11,14 @@ export function UploadScreen({ onUploadComplete }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [donate, setDonate] = useState(false);
 
   const handleFile = useCallback(
     async (file: File) => {
       setIsUploading(true);
       setError(null);
       try {
-        const result = await uploadDiveLog(file);
+        const result = await uploadDiveLog(file, undefined, donate);
         onUploadComplete(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
@@ -25,7 +26,7 @@ export function UploadScreen({ onUploadComplete }: Props) {
         setIsUploading(false);
       }
     },
-    [onUploadComplete]
+    [onUploadComplete, donate]
   );
 
   const handleDrop = useCallback(
@@ -90,6 +91,16 @@ export function UploadScreen({ onUploadComplete }: Props) {
             : "Drop your .ssrf or .xml dive log here, or click to browse"}
         </p>
       </div>
+
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={donate}
+          onChange={(e) => setDonate(e.target.checked)}
+          className="h-4 w-4 rounded border-muted accent-primary"
+        />
+        Donate my dive log to help improve DiveRoast
+      </label>
 
       {error && (
         <p className="text-sm text-danger">{error}</p>

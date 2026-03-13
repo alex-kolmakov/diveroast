@@ -9,9 +9,11 @@ import type { ChatMessage, DashboardData } from "@/types";
 
 interface Props {
   data: DashboardData;
-  messages: ChatMessage[];
-  isLoading: boolean;
-  onToggleChat: () => void;
+  messages?: ChatMessage[];
+  isLoading?: boolean;
+  onToggleChat?: () => void;
+  shareUrl?: string;
+  readOnly?: boolean;
 }
 
 const STAT_ICONS = [
@@ -21,7 +23,7 @@ const STAT_ICONS = [
   { icon: Thermometer, label: "Adverse Dives", suffix: "" },
 ];
 
-export function Dashboard({ data, messages, isLoading, onToggleChat }: Props) {
+export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
   const statValues = [
     data.aggregate_stats.avg_max_depth.toFixed(1),
     data.aggregate_stats.avg_sac_rate.toFixed(1),
@@ -32,7 +34,21 @@ export function Dashboard({ data, messages, isLoading, onToggleChat }: Props) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl space-y-6 p-6">
-        <DashboardHeader stats={data.aggregate_stats} onToggleChat={onToggleChat} />
+        {readOnly && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-center text-muted-foreground">
+            Viewing shared dive results —{" "}
+            <a href="/" className="text-primary underline underline-offset-2 hover:no-underline">
+              upload yours to get roasted
+            </a>
+          </div>
+        )}
+
+        <DashboardHeader
+          stats={data.aggregate_stats}
+          onToggleChat={onToggleChat}
+          shareUrl={shareUrl}
+          readOnly={readOnly}
+        />
 
         <Separator />
 
@@ -67,8 +83,12 @@ export function Dashboard({ data, messages, isLoading, onToggleChat }: Props) {
           </div>
         </div>
 
-        {/* Agent roast summary */}
-        <AgentRoastSummary messages={messages} isLoading={isLoading} />
+        {/* Agent roast summary — live sessions stream from messages; shared views use snapshot */}
+        <AgentRoastSummary
+          messages={messages}
+          isLoading={isLoading}
+          staticText={readOnly ? data.roast_summary : undefined}
+        />
 
         {/* Diver Profile */}
         {data.diver_profile && (
