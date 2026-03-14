@@ -45,8 +45,16 @@ def extract_all_dive_profiles_refined(root):
             dive_number = dive.attrib.get("number", "N/A")
             trip_map[dive_number] = trip_name
     # Extract dive profiles
+    _unnumbered_count = 0
     for dive in root.findall(".//dive"):
-        dive_number = dive.attrib.get("number", "N/A")
+        raw_number = dive.attrib.get("number")
+        if raw_number is not None:
+            dive_number = raw_number
+        else:
+            _unnumbered_count += 1
+            date = dive.attrib.get("date", "unknown")
+            time = dive.attrib.get("time", str(_unnumbered_count)).replace(":", "")
+            dive_number = f"unnum_{date}_{time}"
         trip_name = trip_map.get(dive_number, "N/A")
         dive_site_uuid = dive.attrib.get("divesiteid", "N/A")
         site_info = divesites.get(
