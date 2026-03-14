@@ -92,26 +92,6 @@ DiveRoast exposes its diving tools as an MCP server (stdio transport). Add to yo
 
 Available tools: `search_dan_incidents`, `search_dan_guidelines`, `parse_dive_log`, `analyze_dive_profile`, `get_dive_summary`, `list_dives`, `refresh_dan_data`.
 
-## Production Deployment (Hetzner VPS)
-
-DiveRoast runs on a **Hetzner VPS** (cpx22, ~€4.50/mo) with Docker Compose, nginx as an SSL-terminating reverse proxy, and Cloudflare in front for DNS and DDoS protection.
-
-```bash
-# On a fresh Debian 12 VPS — run once as root:
-bash deploy/setup-vps.sh
-
-# Place your Cloudflare Origin Certificate at:
-#   /etc/ssl/cloudflare/cert.pem
-#   /etc/ssl/cloudflare/key.pem
-
-# Configure environment:
-cp .env.prod.sample .env
-# Set GEMINI_API_KEY in .env
-
-# Start everything:
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
 **Architecture:**
 
 | Container | Role | Exposed |
@@ -120,9 +100,6 @@ docker compose -f docker-compose.prod.yml up -d --build
 | `diveroast-backend` | FastAPI + agent + RAG | internal only |
 | `diveroast-frontend` | React SPA (nginx:alpine) | internal only |
 | `diveroast-phoenix` | Arize Phoenix tracing UI | internal only (SSH tunnel to access) |
-
-All data (snapshots, donated dive logs) lives in named Docker volumes — persistent across restarts. Phoenix is not exposed publicly; access it via `ssh -L 6006:localhost:6006 root@<vps-ip>`.
-
 
 ## Project Structure
 
