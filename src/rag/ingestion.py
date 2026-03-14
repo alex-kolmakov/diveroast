@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import re
 from typing import Any
@@ -176,6 +177,17 @@ def run_pipeline(full_replace: bool = False):
     )
 
     data = wordpress_rest_api_source() | dan_articles
+
+    if full_replace:
+        # Drop the table explicitly before running so Lance doesn't attempt
+        # schema evolution (adding chunk_id to an existing nullable-free table
+        # raises "All-null columns must be nullable").
+        db = lancedb.connect(settings.LANCEDB_URI)
+        with contextlib.suppress(Exception):
+            db.drop_table(settings.LANCEDB_TABLE_NAME)
+        logger.info(
+            "Dropped existing table '%s' for full rebuild.", settings.LANCEDB_TABLE_NAME
+        )
 
     write_disposition = "replace" if full_replace else "merge"
     # merge: chunk_id (url + positional index) is the primary key.
