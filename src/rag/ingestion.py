@@ -123,9 +123,16 @@ def wordpress_rest_api_source():
 _chunk_count = 0
 
 
-@dlt.transformer()
+@dlt.transformer(primary_key="chunk_id")
 def dan_articles(article):
-    """Transform DAN articles into text chunks for vectorization."""
+    """Transform DAN articles into text chunks for vectorization.
+
+    Each chunk gets a stable ``chunk_id`` derived from the article URL and its
+    positional index so that dlt merge can upsert chunks in-place when an
+    article is edited, without creating orphan rows.
+    """
+    import hashlib
+
     global _chunk_count
     title = article.get("title", {}).get("rendered", "unknown")
     clean_content = remove_html_tags(article["content"]["rendered"])
@@ -138,12 +145,20 @@ def dan_articles(article):
         _chunk_count,
     )
     url = article.get("link", "")
-    for chunk in chunks:
-        yield {"value": chunk, "title": title, "url": url}
+    for i, chunk in enumerate(chunks):
+        chunk_id = hashlib.md5(f"{url}::{i}".encode()).hexdigest()
+        yield {"chunk_id": chunk_id, "value": chunk, "title": title, "url": url}
 
 
-def run_pipeline(*args, **kwargs):
-    """Run the DAN articles ingestion pipeline into LanceDB."""
+def run_pipeline(full_replace: bool = False):
+    """Run the DAN articles ingestion pipeline into LanceDB.
+
+    Args:
+        full_replace: When True, drops and recreates the table from scratch
+            (use once to migrate an existing table to the chunk_id schema).
+            When False (default), merges only articles modified since the last
+            run using chunk_id as the primary key.
+    """
     global _chunk_count
     _chunk_count = 0
 
@@ -151,7 +166,7 @@ def run_pipeline(*args, **kwargs):
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
 
-    logger.info("Starting DAN ingestion pipeline...")
+    logger.info("Starting DAN ingestion pipeline (full_replace=%s)...", full_replace)
     logger.info("Base URL: %s", settings.DAN_BASE_URL)
 
     pipeline = dlt.pipeline(
@@ -162,12 +177,15 @@ def run_pipeline(*args, **kwargs):
 
     data = wordpress_rest_api_source() | dan_articles
 
-    # Use 'replace' disposition: chunks don't have a natural primary key,
-    # and 'merge' requires one for LanceDB orphan removal.
+    write_disposition = "replace" if full_replace else "merge"
+    # merge: chunk_id (url + positional index) is the primary key.
+    # Incremental source fetches only articles modified since the last run;
+    # their chunks are upserted in-place. First run fetches everything.
+    # replace: full rebuild — use once to migrate schema on an existing table.
     info = pipeline.run(
         lancedb_adapter(data, embed="value"),
         table_name="texts",
-        write_disposition="replace",
+        write_disposition=write_disposition,
     )
 
     logger.info("Pipeline load info: %s", info)

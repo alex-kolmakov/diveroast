@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Donated dive log storage
     DONATIONS_DIR: str = "/tmp/diveroast-donations"
 
+    # Admin
+    ADMIN_SECRET: str = ""  # Set in .env / Secret Manager to protect admin endpoints
+
     # DAN scraping
     DAN_BASE_URL: str = "https://dan.org/wp-json/wp/v2/"
     DAN_PER_PAGE: int = 100
