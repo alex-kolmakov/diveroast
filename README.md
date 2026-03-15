@@ -1,4 +1,4 @@
-# DiveRoast 🌊
+# [DiveRoast](https://diveroast.app/) 🌊
 
 **A conversational agent that roasts your SCUBA diving — backed by real safety data.**
 
