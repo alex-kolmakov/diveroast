@@ -80,6 +80,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             depth_variability=("depth", "std"),
             avg_temp=("temperature", "mean"),
             max_temp=("temperature", "max"),
+            min_temp=("temperature", "min"),
             temp_variability=("temperature", "std"),
             avg_pressure=("pressure", "mean"),
             max_pressure=("pressure", "max"),
@@ -121,6 +122,12 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Merge the ascend speed features with other features
     features = features.merge(ascend_speed_features, on="dive_number")
+
+    # Temperature gradient: difference between warmest (surface) and coldest (depth)
+    # Captures the thermocline the diver crossed within the dive.
+    features["temp_gradient"] = (features["max_temp"] - features["min_temp"]).clip(
+        lower=0
+    )
     # Fill NaN values in variability columns with the mean of each column
     features["depth_variability"] = features["depth_variability"].fillna(
         features["depth_variability"].mean()

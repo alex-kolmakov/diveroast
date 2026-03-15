@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ENABLE_RERANKING: bool = True  # set False in tests / offline environments
 
     # Prompt
-    PROMPT_VERSION: int = 3
+    PROMPT_VERSION: int = 4
 
     # Phoenix
     PHOENIX_COLLECTOR_ENDPOINT: str = "http://localhost:6006/v1/traces"

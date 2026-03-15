@@ -61,6 +61,8 @@ def test_extract_features():
         "depth_variability",
         "avg_temp",
         "max_temp",
+        "min_temp",
+        "temp_gradient",
         "temp_variability",
         "avg_pressure",
         "max_pressure",

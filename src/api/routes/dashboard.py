@@ -268,7 +268,9 @@ def _generate_dive_summaries(
             f"  Stats: max_depth={d['stats']['max_depth']:.1f}m, "
             f"max_ascent={d['stats']['max_ascend_speed']:.1f} m/min, "
             f"min_ndl={d['stats']['min_ndl']:.0f} min, "
-            f"sac_rate={d['stats']['sac_rate']:.1f} L/min"
+            f"sac_rate={d['stats']['sac_rate']:.1f} L/min, "
+            f"avg_temp={d['stats']['avg_temp']:.1f}°C, "
+            f"temp_gradient={d['stats']['temp_gradient']:.1f}°C"
         )
 
     try:
@@ -332,14 +334,26 @@ def _build_diver_profile(features_df) -> DiverProfile:
     water_types = set()
     regions = set()
     dive_sites = []
+    temp_exposure: dict[str, int] = {
+        "Tropical (>24°C)": 0,
+        "Temperate (15-24°C)": 0,
+        "Cold (<15°C)": 0,
+    }
 
     for _, row in features_df.iterrows():
         # Water type from temperature
         avg_temp = float(row.get("avg_temp", 0))
         if avg_temp > 0:
-            water_types.add(_classify_water_type(avg_temp))
+            water_type = _classify_water_type(avg_temp)
+            water_types.add(water_type)
+            if avg_temp > 24:
+                temp_exposure["Tropical (>24°C)"] += 1
+            elif avg_temp >= 15:
+                temp_exposure["Temperate (15-24°C)"] += 1
+            else:
+                temp_exposure["Cold (<15°C)"] += 1
 
-        # Water type from site/trip name keywords
+        # Water type from site/trip name keywords (environment type, not temperature band)
         site_name = str(row.get("dive_site_name", ""))
         trip_name = str(row.get("trip_name", ""))
         combined = f"{site_name} {trip_name}".lower()
@@ -367,6 +381,7 @@ def _build_diver_profile(features_df) -> DiverProfile:
         regions=sorted(regions),
         experience_level=experience_level,
         dive_sites=dive_sites,
+        temp_exposure={k: v for k, v in temp_exposure.items() if v > 0},
     )
 
 
@@ -398,6 +413,8 @@ async def get_dashboard(
                 depth_variability=round(float(row["depth_variability"]), 2),
                 avg_temp=round(float(row["avg_temp"]), 2),
                 max_temp=round(float(row["max_temp"]), 2),
+                min_temp=round(float(row["min_temp"]), 2),
+                temp_gradient=round(float(row["temp_gradient"]), 2),
                 temp_variability=round(float(row["temp_variability"]), 2),
                 avg_pressure=round(float(row["avg_pressure"]), 2),
                 max_pressure=round(float(row["max_pressure"]), 2),

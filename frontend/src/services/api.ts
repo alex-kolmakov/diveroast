@@ -5,8 +5,12 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 async function fetchJSON<T>(url: string, fallback: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || fallback);
+    try {
+      const error = await response.json();
+      throw new Error(error.detail || fallback);
+    } catch {
+      throw new Error(`${fallback} (HTTP ${response.status})`);
+    }
   }
   return response.json();
 }

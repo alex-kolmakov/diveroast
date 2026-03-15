@@ -51,13 +51,17 @@ class DiverRoastAgent:
             if trip and trip != "N/A" and trip != site:
                 location += f" ({trip})"
 
+            temp_grad = row.get("temp_gradient", 0)
+            temp_str = f"temp {row['avg_temp']:.1f}°C"
+            if temp_grad > 1:
+                temp_str += f" (gradient {temp_grad:.1f}°C)"
             line = (
                 f"  #{dn} {location}: "
                 f"depth {row['max_depth']:.1f}m, "
                 f"ascent {row['max_ascend_speed']:.1f}m/min, "
                 f"NDL {row['min_ndl']:.0f}min, "
                 f"SAC {row['sac_rate']:.1f}L/min, "
-                f"temp {row['avg_temp']:.1f}°C"
+                f"{temp_str}"
             )
             if row.get("adverse_conditions"):
                 line += " [ADVERSE]"
@@ -65,6 +69,29 @@ class DiverRoastAgent:
 
         # Compute aggregate stats
         n = len(features_df)
+        # Temperature exposure breakdown
+        tropical = int((features_df["avg_temp"] > 24).sum())
+        temperate = int(
+            ((features_df["avg_temp"] >= 15) & (features_df["avg_temp"] <= 24)).sum()
+        )
+        cold = int((features_df["avg_temp"] < 15).sum())
+        temp_exposure_parts = []
+        if tropical:
+            temp_exposure_parts.append(f"{tropical} tropical (>24°C)")
+        if temperate:
+            temp_exposure_parts.append(f"{temperate} temperate (15-24°C)")
+        if cold:
+            temp_exposure_parts.append(f"{cold} cold (<15°C)")
+        temp_exposure_str = (
+            ", ".join(temp_exposure_parts) if temp_exposure_parts else "unknown"
+        )
+
+        avg_gradient = (
+            features_df["temp_gradient"].mean()
+            if "temp_gradient" in features_df.columns
+            else 0
+        )
+
         agg = (
             f"Aggregates ({n} dives): "
             f"avg max depth {features_df['max_depth'].mean():.1f}m, "
@@ -74,7 +101,9 @@ class DiverRoastAgent:
             f"avg max ascent {features_df['max_ascend_speed'].mean():.1f} m/min, "
             f"fastest ascent {features_df['max_ascend_speed'].max():.1f} m/min, "
             f"lowest NDL {features_df['min_ndl'].min():.0f} min, "
-            f"{int(features_df['adverse_conditions'].sum())} adverse-condition dives"
+            f"{int(features_df['adverse_conditions'].sum())} adverse-condition dives | "
+            f"temperature exposure: {temp_exposure_str}, "
+            f"avg thermocline gradient {avg_gradient:.1f}°C"
         )
 
         # Cap at 200 dives in context to avoid token bloat

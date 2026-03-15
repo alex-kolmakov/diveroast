@@ -7,6 +7,13 @@ import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
 import type { ChatMessage, DashboardData } from "@/types";
 
+// Temperature labels that belong in the dedicated temp section, not Water Types
+const TEMP_WATER_TYPES = new Set(["Cold water", "Temperate", "Tropical"]);
+
+const COLD_COLOR = "#3b82f6";
+const TEMP_COLOR = "#22c55e";
+const TROP_COLOR = "#ef4444";
+
 interface Props {
   data: DashboardData;
   messages?: ChatMessage[];
@@ -94,56 +101,74 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
         {data.diver_profile && (
           <div>
             <h2 className="mb-4 text-lg font-semibold">Diver Profile</h2>
-            <Card>
-              <CardContent className="grid gap-4 pt-4 md:grid-cols-2 lg:grid-cols-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                    <Award className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium capitalize">{data.diver_profile.experience_level}</div>
-                    <div className="text-xs text-muted-foreground">Experience Level</div>
-                  </div>
-                </div>
-                {data.diver_profile.water_types.length > 0 && (
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                      <Waves className="h-5 w-5 text-primary" />
+            <div className="space-y-3">
+              {/* Main profile row */}
+              <Card>
+                <CardContent className="grid gap-4 pt-4 md:grid-cols-2 lg:grid-cols-4">
+                  {(() => {
+                    const nonTempWaterTypes = data.diver_profile.water_types.filter(
+                      (t) => !TEMP_WATER_TYPES.has(t)
+                    );
+                    return (
+                      <>
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                            <Award className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium capitalize">{data.diver_profile.experience_level}</div>
+                            <div className="text-xs text-muted-foreground">Experience Level</div>
+                          </div>
+                        </div>
+                        {nonTempWaterTypes.length > 0 && (
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                              <Waves className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium">{nonTempWaterTypes.join(", ")}</div>
+                              <div className="text-xs text-muted-foreground">Water Types</div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  {data.diver_profile.regions.length > 0 && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                        <MapPin className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{data.diver_profile.regions.join(", ")}</div>
+                        <div className="text-xs text-muted-foreground">Regions</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-sm font-medium">{data.diver_profile.water_types.join(", ")}</div>
-                      <div className="text-xs text-muted-foreground">Water Types</div>
+                  )}
+                  {data.diver_profile.dive_sites.length > 0 && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                        <User className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{data.diver_profile.dive_sites.length} sites</div>
+                        <div className="text-xs text-muted-foreground">Dive Sites Visited</div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Temperature exposure row */}
+              {data.diver_profile.temp_exposure &&
+                Object.keys(data.diver_profile.temp_exposure).length > 0 && (
+                  <TemperatureExposureCard exposure={data.diver_profile.temp_exposure} />
                 )}
-                {data.diver_profile.regions.length > 0 && (
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                      <MapPin className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">{data.diver_profile.regions.join(", ")}</div>
-                      <div className="text-xs text-muted-foreground">Regions</div>
-                    </div>
-                  </div>
-                )}
-                {data.diver_profile.dive_sites.length > 0 && (
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                      <User className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">{data.diver_profile.dive_sites.length} sites</div>
-                      <div className="text-xs text-muted-foreground">Dive Sites Visited</div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            </div>
           </div>
         )}
 
-        {/* Top 3 problematic dives */}
+        {/* Top 3 worst dives */}
         {data.top_problematic_dives.length > 0 && (
           <div>
             <h2 className="mb-4 text-lg font-semibold">Top 3 Worst Dives</h2>
@@ -157,4 +182,82 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
       </div>
     </div>
   );
+}
+
+function TemperatureExposureCard({ exposure }: { exposure: Record<string, number> }) {
+  const cold = exposure["Cold (<15°C)"] ?? 0;
+  const temperate = exposure["Temperate (15-24°C)"] ?? 0;
+  const tropical = exposure["Tropical (>24°C)"] ?? 0;
+  const total = cold + temperate + tropical || 1;
+  const coldPct = (cold / total) * 100;
+  const tempPct = (temperate / total) * 100;
+  const tropPct = (tropical / total) * 100;
+  const title = _tempTitle(cold, temperate, tropical, total);
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Thermometer className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-baseline justify-between mb-2">
+              <div className="text-sm font-medium">Temperature Exposure</div>
+              <div className="text-xs font-semibold" style={{ color: _titleColor(cold, temperate, tropical) }}>
+                {title}
+              </div>
+            </div>
+            <div className="h-3 w-full rounded-full overflow-hidden">
+              <div className="flex h-full w-full">
+                {coldPct > 0 && <div className="h-full" style={{ width: `${coldPct}%`, background: COLD_COLOR }} />}
+                {tempPct > 0 && <div className="h-full" style={{ width: `${tempPct}%`, background: TEMP_COLOR }} />}
+                {tropPct > 0 && <div className="h-full" style={{ width: `${tropPct}%`, background: TROP_COLOR }} />}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {cold > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-semibold" style={{ color: COLD_COLOR }}>{cold}</span> Cold (&lt;15°C) · {coldPct.toFixed(0)}%
+                </span>
+              )}
+              {temperate > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-semibold" style={{ color: TEMP_COLOR }}>{temperate}</span> Temperate (15–24°C) · {tempPct.toFixed(0)}%
+                </span>
+              )}
+              {tropical > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-semibold" style={{ color: TROP_COLOR }}>{tropical}</span> Tropical (&gt;24°C) · {tropPct.toFixed(0)}%
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function _tempTitle(cold: number, temperate: number, tropical: number, total: number): string {
+  const cPct = cold / total;
+  const tPct = temperate / total;
+  const trPct = tropical / total;
+
+  if (trPct >= 0.85) return "Coral Chaser";
+  if (trPct >= 0.65) return "Warmwater Regular";
+  if (cPct >= 0.85) return "Ice Diver";
+  if (cPct >= 0.65) return "Cold Water Devotee";
+  if (tPct >= 0.65) return "Temperate Explorer";
+  if (cPct >= 0.4 && trPct <= 0.2) return "Cold Water Diver";
+  if (trPct >= 0.4 && cPct <= 0.2) return "Sun Seeker";
+  if (Math.abs(cPct - trPct) < 0.15 && tPct < 0.3) return "Extreme Contrarian";
+  return "All-Around Diver";
+}
+
+function _titleColor(cold: number, temperate: number, tropical: number): string {
+  const total = cold + temperate + tropical || 1;
+  if (tropical / total >= 0.65) return TROP_COLOR;
+  if (cold / total >= 0.65) return COLD_COLOR;
+  return TEMP_COLOR;
 }

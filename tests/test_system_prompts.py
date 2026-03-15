@@ -77,7 +77,7 @@ class TestGetActivePrompt:
             return_value=None,
         ):
             result = get_active_prompt()
-            assert result.version == 3
+            assert result.version == 4
             assert result.phoenix_version_id is None
             assert "DiveRoast" in result.prompt
 

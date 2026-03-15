@@ -28,6 +28,8 @@ class DiveFeature(BaseModel):
     depth_variability: float
     avg_temp: float
     max_temp: float
+    min_temp: float
+    temp_gradient: float
     temp_variability: float
     avg_pressure: float
     max_pressure: float
@@ -85,6 +87,9 @@ class DiverProfile(BaseModel):
     regions: list[str]
     experience_level: str
     dive_sites: list[str]
+    temp_exposure: dict[
+        str, int
+    ]  # e.g. {"Tropical (>24°C)": 45, "Temperate (15-24°C)": 12}
 
 
 class DashboardResponse(BaseModel):

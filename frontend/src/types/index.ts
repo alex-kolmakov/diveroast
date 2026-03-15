@@ -26,6 +26,8 @@ export interface DiveFeature {
   depth_variability: number;
   avg_temp: number;
   max_temp: number;
+  min_temp: number;
+  temp_gradient: number;
   temp_variability: number;
   avg_pressure: number;
   max_pressure: number;
@@ -83,6 +85,7 @@ export interface DiverProfile {
   regions: string[];
   experience_level: string;
   dive_sites: string[];
+  temp_exposure: Record<string, number>;
 }
 
 export interface DashboardData {
