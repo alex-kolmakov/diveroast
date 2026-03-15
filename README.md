@@ -11,6 +11,7 @@
 ![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)
 
 ![Video](https://github.com/user-attachments/assets/d1ff533f-4571-4265-89af-fece462566f0) 
+>[Link to the report](https://diveroast.app/shared/6a977e62-5666-43ed-aba1-af7044a27baf)
 
 ## My story behind it
 
