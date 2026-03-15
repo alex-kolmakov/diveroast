@@ -10,7 +10,7 @@
 ![Arize Phoenix](https://img.shields.io/badge/Arize-Phoenix-orange)
 ![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)
 
-![Video]([https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/5d043a91-39bb-4b77-a49c-bd19b82cf04a](https://github.com/user-attachments/assets/d1ff533f-4571-4265-89af-fece462566f0)) 
+![Video](https://github.com/user-attachments/assets/d1ff533f-4571-4265-89af-fece462566f0) 
 
 ## My story behind it
 
