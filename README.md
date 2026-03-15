@@ -10,8 +10,7 @@
 ![Arize Phoenix](https://img.shields.io/badge/Arize-Phoenix-orange)
 ![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)
 
-![Screen Recording 2026-02-17 at 5 14 59 PM](https://github.com/user-attachments/assets/c81ba2e6-4cf5-4e92-8f8e-9ef496a26aa6)
-
+![Video]([https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/5d043a91-39bb-4b77-a49c-bd19b82cf04a](https://github.com/user-attachments/assets/d1ff533f-4571-4265-89af-fece462566f0)) 
 
 ## My story behind it
 
@@ -19,13 +18,13 @@
 
 Any diver with experience will tell you instantly which of these two dive profiles is a problem (and yes both are mine):
 
-| Dive #1 — the rough one | Dive #2 — the clean one |
+| Dive #1 | Dive #2 |
 | ----------------------- | ----------------------- |
 | ![Dive #1](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/5d043a91-39bb-4b77-a49c-bd19b82cf04a) | ![Dive #2](https://github.com/alex-kolmakov/divelog-autoreport/assets/3127175/86bc990c-55e9-4c14-9db9-310b88b3c4bb) |
 
-*Dive profiles aren't just squiggly lines. They can tell a story.*
+*Dive profiles can tell a story.*
 
-**So what a computer could read them the way an experienced instructor does?**
+**So what if an app could read them the way an experienced instructor does?**
 Not only scolding you for fast ascents(dive computers do that well already), but showing your overall stats, knowing what DAN considers good practice and roasting your bad diving habits so you can improve?
 
 **That's DiveRoast.**
