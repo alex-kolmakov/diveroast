@@ -51,12 +51,41 @@ def test_ascent_metrics_independent_of_sample_rate():
     assert coarse["high_ascend_speed_count"] == fine["high_ascend_speed_count"] == 1
 
 
-def test_safety_stop_to_surface_sprint_is_excluded():
-    # Slow 6 m/min ascent, then 5 m -> surface in 10 s (30 m/min).
+def test_sprint_from_the_stop_is_a_surfacing_bolt_not_a_sustained_one():
+    # Slow 6 m/min ascent, 3-minute stop, then 5 m -> surface in 10 s.
     legs = [(120, 20), (300, 20), (150, 5), (180, 5), (10, 0)]
     result = calculate_ascend_speed(_dive(legs, 10)).iloc[0]
     assert result["max_ascend_speed"] < 10
     assert result["high_ascend_speed_count"] == 0
+    # Timed from the 5 m mark to the 1 m surface line: 4 m in 8 s.
+    assert abs(result["max_shallow_ascend_speed"] - 30.0) < 0.01
+    assert result["shallow_bolt_count"] == 1
+
+
+def test_controlled_surfacing_is_not_a_bolt():
+    # Stop at 5 m, then a full minute to the surface (5 m/min).
+    legs = [(120, 20), (300, 20), (150, 5), (180, 5), (60, 0)]
+    result = calculate_ascend_speed(_dive(legs, 10)).iloc[0]
+    assert abs(result["max_shallow_ascend_speed"] - 5.0) < 0.01
+    assert result["shallow_bolt_count"] == 0
+
+
+def test_surfacing_speed_independent_of_sample_rate():
+    legs = [(120, 20), (300, 20), (150, 5), (180, 5), (10, 0)]
+    coarse = calculate_ascend_speed(_dive(legs, 10)).iloc[0]
+    fine = calculate_ascend_speed(_dive(legs, 1)).iloc[0]
+    assert (
+        abs(coarse["max_shallow_ascend_speed"] - fine["max_shallow_ascend_speed"])
+        < 0.01
+    )
+
+
+def test_shallow_reef_swimming_is_not_a_bolt():
+    # Up and down between 3 and 6 m for 40 minutes, then a slow finish.
+    legs = [(60, 6)] + [(60, 3), (60, 6)] * 20 + [(60, 3), (90, 0)]
+    result = calculate_ascend_speed(_dive(legs, 10)).iloc[0]
+    assert result["shallow_bolt_count"] == 0
+    assert result["max_shallow_ascend_speed"] < 5
 
 
 def test_direct_ascent_from_depth_still_counts():
@@ -65,6 +94,9 @@ def test_direct_ascent_from_depth_still_counts():
     result = calculate_ascend_speed(_dive(legs, 10)).iloc[0]
     assert result["max_ascend_speed"] > 15
     assert result["high_ascend_speed_count"] == 1
+    # ...and its shallow end is a bolt to the surface too.
+    assert result["max_shallow_ascend_speed"] > 15
+    assert result["shallow_bolt_count"] == 1
 
 
 def test_separate_fast_ascents_are_separate_events():
@@ -109,6 +141,8 @@ def test_extract_features():
         "sac_rate",
         "max_ascend_speed",
         "high_ascend_speed_count",
+        "max_shallow_ascend_speed",
+        "shallow_bolt_count",
         "dive_site_name",
         "trip_name",
         "latitude",

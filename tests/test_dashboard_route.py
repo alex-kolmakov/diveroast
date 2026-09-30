@@ -95,8 +95,23 @@ class TestComputeDangerScore:
         # NDL warning: 3, ascent warning: 2, SAC warning: 1, depth warning: 1
         assert score == 7.0
 
+    def test_bolt_to_surface_scores_like_a_sustained_fast_ascent(self):
+        calm = {"max_ascend_speed": 6, "max_shallow_ascend_speed": 6, "max_depth": 12}
+        bolt = {**calm, "max_shallow_ascend_speed": 12}
+        hard_bolt = {**calm, "max_shallow_ascend_speed": 24}
+        sustained = {**calm, "max_ascend_speed": 12}
+        assert _compute_danger_score(calm) == 0.0
+        assert _compute_danger_score(bolt) == 2.0
+        assert (
+            _compute_danger_score(hard_bolt) == 4.0 == _compute_danger_score(sustained)
+        )
+
 
 class TestIdentifyIssues:
+    def test_bolt_to_surface_is_its_own_issue(self):
+        row = {"max_ascend_speed": 6, "max_shallow_ascend_speed": 18, "max_depth": 12}
+        assert _identify_issues(row) == ["bolted to surface"]
+
     def test_no_issues(self):
         row = {
             "max_ascend_speed": 5,

@@ -44,6 +44,8 @@ export interface DiveFeature {
   sac_rate: number | null;
   max_ascend_speed: number;
   high_ascend_speed_count: number;
+  max_shallow_ascend_speed?: number; // fastest surfacing through the last 8 m
+  shallow_bolt_count?: number;
   dive_site_name: string;
   trip_name: string;
   latitude: number | null;
@@ -86,6 +88,7 @@ export interface AggregateStats {
   avg_sac_rate: number | null;
   avg_max_ascend_speed: number;
   dives_with_fast_ascent?: number | null; // absent in older shared snapshots
+  dives_with_shallow_bolt?: number | null;
   data_coverage?: Record<string, number>;
 }
 

@@ -79,9 +79,17 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
             <span className="font-medium">{dive.features.max_depth.toFixed(1)}m</span>
           </div>
           <div>
-            <span className="text-muted-foreground">Max ascent: </span>
+            <span className="text-muted-foreground">Sustained ascent: </span>
             <span className="font-medium">
               {dive.features.max_ascend_speed.toFixed(1)} m/min
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Surfacing: </span>
+            <span className="font-medium">
+              {dive.features.max_shallow_ascend_speed != null
+                ? `${dive.features.max_shallow_ascend_speed.toFixed(1)} m/min`
+                : "–"}
             </span>
           </div>
           <div>

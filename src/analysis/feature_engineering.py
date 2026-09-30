@@ -1,51 +1,92 @@
 import numpy as np
 import pandas as pd
 
-# Ascent-rate metric parameters
-ASCENT_WINDOW_S = 30.0  # rate is measured over this trailing window
-ASCENT_LIMIT_M_MIN = 10.0  # recommended maximum ascent rate
-SHALLOW_THRESHOLD_M = 2.0  # sensor noise dominates shallower than this
-FINAL_ASCENT_WINDOW_S = 60.0  # exclude the last minute before surfacing...
-FINAL_ASCENT_MAX_DEPTH_M = 6.0  # ...but only in the safety-stop band
+# Ascent-rate metrics come in two tiers:
+#   sustained  - 30 s average over the whole dive (the 9-10 m/min guideline)
+#   surfacing  - speed of each final approach to the surface through the last
+#                8 m, where the relative pressure drop is largest (8 m ->
+#                surface is 1.8 -> 1.0 bar, a 44% drop). Short bolts from the
+#                safety stop are caught instead of being averaged away.
+ASCENT_WINDOW_S = 30.0
+ASCENT_LIMIT_M_MIN = 10.0
+SHALLOW_THRESHOLD_M = 2.0  # sustained tier: sensor noise dominates shallower
+SHALLOW_ZONE_M = 8.0
+SURFACE_M = 1.0  # shallower than this counts as at the surface
+# Depth marks the surfacing approach is timed from. The fastest wins, so a
+# stop at 5 m followed by a sprint from 4 m is timed from 4 m.
+SURFACING_MARKS_M = (SHALLOW_ZONE_M, 6.0, 5.0, 4.0, 3.0)
+SHALLOW_ASCENT_LIMIT_M_MIN = 10.0
 
 # An NDL of 0 is only a real reading if the computer counted down to it.
 NDL_COUNTDOWN_MAX_MIN = 5.0
 
 
-def _dive_ascent_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
-    """Windowed ascent rate (m/min, positive = ascending) for one dive.
+def _window_rates(
+    times: np.ndarray, depths: np.ndarray, window_s: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Ascent rate (m/min, positive = ascending) over a trailing time window.
 
-    Each sample's rate is the depth change over the trailing
-    ``ASCENT_WINDOW_S`` seconds, linearly interpolated between samples, so it
-    doesn't depend on the computer's sample interval. Samples that are
-    ineligible (first window, near-surface noise, the final 5 m -> surface
-    move) are NaN.
+    Depth at the window start is linearly interpolated between samples, so the
+    rate doesn't depend on the computer's sample interval. Returns the rates
+    (NaN for the first window of the dive) and the depth at each window start.
     """
     rates = np.full(len(times), np.nan)
-    if len(times) < 2:
-        return rates
-
-    window_start = times - ASCENT_WINDOW_S
-    eligible = window_start >= times[0]
+    window_start = times - window_s
     depth_then = np.interp(window_start, times, depths)
-    rates[eligible] = (depth_then[eligible] - depths[eligible]) / ASCENT_WINDOW_S * 60
+    eligible = window_start >= times[0]
+    rates[eligible] = (depth_then[eligible] - depths[eligible]) / window_s * 60
+    return rates, depth_then
 
-    # Near-surface readings are noisy (1 m in 1 s reads as 60 m/min).
+
+def _sustained_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
+    """30 s ascent rates, excluding windows that touch the noisy top 2 m."""
+    rates, depth_then = _window_rates(times, depths, ASCENT_WINDOW_S)
     rates[(depths < SHALLOW_THRESHOLD_M) | (depth_then < SHALLOW_THRESHOLD_M)] = np.nan
-
-    # The move from the safety stop to the surface is not what the ascent-rate
-    # limit is about. Exclude the last minute before final surfacing, but only
-    # samples in the safety-stop band, so a direct ascent from depth still
-    # registers on its deeper part.
-    deep = np.nonzero(depths >= SHALLOW_THRESHOLD_M)[0]
-    if len(deep):
-        last_deep = deep[-1]
-        surfaced_at = times[min(last_deep + 1, len(times) - 1)]
-        final_leg = (times > surfaced_at - FINAL_ASCENT_WINDOW_S) & (
-            depths < FINAL_ASCENT_MAX_DEPTH_M
-        )
-        rates[final_leg] = np.nan
     return rates
+
+
+def _crossing_time(
+    times: np.ndarray, depths: np.ndarray, j: int, level: float
+) -> float:
+    """Time between samples j and j+1 at which depth crosses ``level``."""
+    d0, d1 = depths[j], depths[j + 1]
+    if d0 == d1:
+        return float(times[j])
+    return float(times[j] + (d0 - level) / (d0 - d1) * (times[j + 1] - times[j]))
+
+
+def _surfacing_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
+    """Approach speed (m/min) of each arrival at the surface.
+
+    For every arrival shallower than ``SURFACE_M``, time the ascent from the
+    last crossing of each mark in ``SURFACING_MARKS_M`` to the surface and
+    keep the fastest. Crossing times are interpolated between samples, so the
+    result doesn't depend on the sample interval. Lingering shallow before
+    surfacing makes the approach slow, not fast, so reef swimming in the top
+    few metres isn't mistaken for a bolt.
+    """
+    at_surface = depths < SURFACE_M
+    arrivals = np.nonzero(at_surface[1:] & ~at_surface[:-1])[0] + 1
+    rates = []
+    for i in arrivals:
+        surfaced_at = _crossing_time(times, depths, i - 1, SURFACE_M)
+        fastest = 0.0
+        for mark in SURFACING_MARKS_M:
+            deeper = np.nonzero(depths[:i] >= mark)[0]
+            if not len(deeper):
+                continue
+            elapsed = surfaced_at - _crossing_time(times, depths, deeper[-1], mark)
+            if elapsed > 0:
+                fastest = max(fastest, (mark - SURFACE_M) / elapsed * 60)
+        rates.append(fastest)
+    return np.array(rates, dtype=float)
+
+
+def _peak_and_episodes(rates: np.ndarray, limit: float) -> tuple[float, int]:
+    """Highest rate (0 if none) and the number of separate runs above limit."""
+    measured = rates[~np.isnan(rates)]
+    peak = float(max(measured.max(), 0.0)) if len(measured) else 0.0
+    return peak, _count_events(np.nan_to_num(rates, nan=0.0) > limit)
 
 
 def _count_events(over: np.ndarray) -> int:
@@ -73,34 +114,50 @@ def clean_ndl(data: pd.DataFrame) -> pd.Series:
     return ndl.mask(sentinel)
 
 
-def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
-    """Max windowed ascent rate and number of fast-ascent events per dive.
+ASCENT_COLUMNS = [
+    "dive_number",
+    "max_ascend_speed",
+    "high_ascend_speed_count",
+    "max_shallow_ascend_speed",
+    "shallow_bolt_count",
+]
 
-    ``max_ascend_speed`` is the highest ``ASCENT_WINDOW_S``-second average
-    ascent rate. ``high_ascend_speed_count`` is the number of separate
-    episodes above ``ASCENT_LIMIT_M_MIN``, not the number of samples, so it
-    doesn't scale with the computer's sample rate.
+
+def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
+    """Two-tier ascent metrics per dive.
+
+    Sustained: ``max_ascend_speed`` is the highest ``ASCENT_WINDOW_S``-second
+    average ascent rate; ``high_ascend_speed_count`` is the number of separate
+    episodes above ``ASCENT_LIMIT_M_MIN``.
+
+    Surfacing: ``max_shallow_ascend_speed`` is the fastest approach to the
+    surface through the last ``SHALLOW_ZONE_M``; ``shallow_bolt_count`` is
+    the number of surfacings faster than ``SHALLOW_ASCENT_LIMIT_M_MIN``.
+
+    Counts are episodes or surfacings, not samples, so they don't scale with
+    the computer's sample rate.
     """
     data = data.sort_values(["dive_number", "time"])
     rows = []
     for dive_number, dive in data.groupby("dive_number", sort=False):
-        rates = _dive_ascent_rates(
-            dive["time"].to_numpy(dtype=float), dive["depth"].to_numpy(dtype=float)
+        times = dive["time"].to_numpy(dtype=float)
+        depths = dive["depth"].to_numpy(dtype=float)
+        sustained_peak, sustained_n = _peak_and_episodes(
+            _sustained_rates(times, depths), ASCENT_LIMIT_M_MIN
         )
-        measured = rates[~np.isnan(rates)]
-        over = np.nan_to_num(rates, nan=0.0) > ASCENT_LIMIT_M_MIN
+        surfacings = _surfacing_rates(times, depths)
+        shallow_peak = float(surfacings.max()) if len(surfacings) else 0.0
+        shallow_n = int((surfacings > SHALLOW_ASCENT_LIMIT_M_MIN).sum())
         rows.append(
             {
                 "dive_number": dive_number,
-                "max_ascend_speed": float(max(measured.max(), 0.0))
-                if len(measured)
-                else 0.0,
-                "high_ascend_speed_count": _count_events(over),
+                "max_ascend_speed": sustained_peak,
+                "high_ascend_speed_count": sustained_n,
+                "max_shallow_ascend_speed": shallow_peak,
+                "shallow_bolt_count": shallow_n,
             }
         )
-    return pd.DataFrame(
-        rows, columns=["dive_number", "max_ascend_speed", "high_ascend_speed_count"]
-    )
+    return pd.DataFrame(rows, columns=ASCENT_COLUMNS)
 
 
 def extract_features(df: pd.DataFrame) -> pd.DataFrame:

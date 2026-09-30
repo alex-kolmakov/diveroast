@@ -44,6 +44,9 @@ class DiveFeature(BaseModel):
     sac_rate: float | None
     max_ascend_speed: float
     high_ascend_speed_count: float
+    # Surfacing tier; defaults keep pre-P1 snapshots loadable
+    max_shallow_ascend_speed: float = 0.0
+    shallow_bolt_count: int = 0
     dive_site_name: str
     trip_name: str
     latitude: float | None
@@ -88,6 +91,7 @@ class AggregateStats(BaseModel):
     avg_sac_rate: float | None
     avg_max_ascend_speed: float
     dives_with_fast_ascent: int | None = None  # None in pre-P1 snapshots
+    dives_with_shallow_bolt: int | None = None  # None in pre-P1 snapshots
     data_coverage: dict[str, int] = {}  # dives with each metric recorded
 
 

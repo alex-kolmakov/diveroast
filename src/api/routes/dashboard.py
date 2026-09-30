@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 # Safety thresholds: (label, unit, safe_upper, warning_upper)
 THRESHOLDS = {
     "max_depth": ("Max Depth", "m", 18.0, 30.0),
-    "max_ascend_speed": ("Max Ascent Speed", "m/min", 9.0, 10.0),
+    "max_ascend_speed": ("Max Sustained Ascent (30 s)", "m/min", 9.0, 10.0),
+    "max_shallow_ascend_speed": ("Fastest Surfacing (last 8 m)", "m/min", 9.0, 10.0),
     "min_ndl": ("Min NDL", "min", None, None),  # inverted: lower is worse
     "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0),
     "avg_temp": ("Avg Temperature", "\u00b0C", None, None),  # informational
@@ -42,6 +43,7 @@ TEMP_COLD_WARNING = 10.0
 # What makes each issue category distinctive for "pick reason"
 PICK_REASONS = {
     "rapid ascent": "Fastest ascent rate",
+    "bolted to surface": "Fastest bolt to the surface",
     "low NDL": "Closest to decompression limit",
     "high air consumption": "Highest air consumption",
     "deep dive": "Deepest dive with issues",
@@ -50,6 +52,7 @@ PICK_REASONS = {
 # Which metric to rank by for each issue (and whether higher or lower is worse)
 ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
     "rapid ascent": ("max_ascend_speed", True),  # higher is worse
+    "bolted to surface": ("max_shallow_ascend_speed", True),  # higher is worse
     "low NDL": ("ndl_rank", False),  # lower is worse; deco entry ranks lowest
     "high air consumption": ("sac_rate", True),  # higher is worse
     "deep dive": ("max_depth", True),  # higher is worse
@@ -211,11 +214,19 @@ def _compute_danger_score(row) -> float:
     elif measured(ndl) and ndl < NDL_SAFE_LOWER:
         score += 3.0
 
-    # Ascent speed (weight 2)
+    # Sustained ascent speed (weight 2)
     ascent = row.get("max_ascend_speed", 0)
     if ascent > 10:
         score += 2.0 * 2
     elif ascent > 9:
+        score += 2.0
+
+    # Surfacing speed through the last 8 m (weight 2): the largest relative
+    # pressure change, so a bolt counts as much as a sustained fast ascent.
+    surfacing = row.get("max_shallow_ascend_speed", 0)
+    if surfacing > 15:
+        score += 2.0 * 2
+    elif surfacing > 10:
         score += 2.0
 
     # SAC rate (weight 1)
@@ -239,6 +250,8 @@ def _identify_issues(row) -> list[str]:
     issues = []
     if row.get("max_ascend_speed", 0) > 9:
         issues.append("rapid ascent")
+    if row.get("max_shallow_ascend_speed", 0) > 10:
+        issues.append("bolted to surface")
     ndl = row.get("min_ndl")
     if row.get("entered_deco") or (measured(ndl) and ndl < NDL_SAFE_LOWER):
         issues.append("low NDL")
@@ -275,6 +288,8 @@ def _generate_dive_summaries(
             f"  Issues: {', '.join(d['issues'])}\n"
             f"  Stats: max_depth={d['stats']['max_depth']:.1f}m, "
             f"max_ascent={d['stats']['max_ascend_speed']:.1f} m/min (30 s average), "
+            f"fastest_surfacing={d['stats']['max_shallow_ascend_speed']:.1f} m/min "
+            f"(through the last 8 m), "
             f"entered_deco={'yes' if d['stats'].get('entered_deco') else 'no'}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
             f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "
@@ -444,6 +459,10 @@ async def get_dashboard(
                 sac_rate=_r(row["sac_rate"]),
                 max_ascend_speed=round(float(row["max_ascend_speed"]), 2),
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),
+                max_shallow_ascend_speed=round(
+                    float(row["max_shallow_ascend_speed"]), 2
+                ),
+                shallow_bolt_count=int(row["shallow_bolt_count"]),
                 dive_site_name=str(row.get("dive_site_name", "N/A")),
                 trip_name=str(row.get("trip_name", "N/A")),
                 latitude=_r(lat, 6) if measured(lat) and lat != 0 else None,
@@ -461,6 +480,9 @@ async def get_dashboard(
         avg_sac_rate=_r(features_df["sac_rate"].mean()),
         avg_max_ascend_speed=round(float(features_df["max_ascend_speed"].mean()), 2),
         dives_with_fast_ascent=int((features_df["max_ascend_speed"] > 10).sum()),
+        dives_with_shallow_bolt=int(
+            (features_df["max_shallow_ascend_speed"] > 10).sum()
+        ),
         data_coverage=data_coverage(features_df),
     )
 

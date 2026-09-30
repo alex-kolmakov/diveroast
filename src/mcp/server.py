@@ -156,7 +156,8 @@ def parse_dive_log(file_path: str) -> str:
 def analyze_dive_profile(dive_number: str) -> str:
     """Analyze a specific dive's safety profile and flag issues.
 
-    Checks for: high ascent rates (>10 m/min over 30 s), deco entry,
+    Checks for: high sustained ascent rates (>10 m/min over 30 s), fast
+    surfacings (>10 m/min through the last 8 m), deco entry,
     dangerously low NDL (<5 min), high air consumption (SAC >20 L/min),
     and deep dives (>30m). Metrics the dive computer
     didn't record are reported as not recorded.

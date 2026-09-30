@@ -27,7 +27,7 @@ const STAT_ICONS = [
   { icon: Anchor, label: "Avg Max Depth", suffix: "m" },
   { icon: Wind, label: "Avg SAC Rate", suffix: "" },
   { icon: ArrowUp, label: "Avg Max Ascent", suffix: "" },
-  { icon: TriangleAlert, label: "Fast Ascents (>10 m/min)", suffix: "" },
+  { icon: TriangleAlert, label: "Fast Ascents · Surface Bolts", suffix: "" },
 ];
 
 export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
@@ -38,7 +38,7 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
       : "not recorded",
     data.aggregate_stats.avg_max_ascend_speed.toFixed(1),
     data.aggregate_stats.dives_with_fast_ascent != null
-      ? String(data.aggregate_stats.dives_with_fast_ascent)
+      ? `${data.aggregate_stats.dives_with_fast_ascent} · ${data.aggregate_stats.dives_with_shallow_bolt ?? "–"}`
       : "–",
   ];
 

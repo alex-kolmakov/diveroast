@@ -17,6 +17,8 @@ import pandas as pd
 from src.analysis.feature_engineering import (
     ASCENT_LIMIT_M_MIN,
     ASCENT_WINDOW_S,
+    SHALLOW_ASCENT_LIMIT_M_MIN,
+    SHALLOW_ZONE_M,
     data_coverage,
     extract_features,
 )
@@ -97,6 +99,9 @@ def describe_features(row) -> str:
         f"max ascent rate {fmt(row.get('max_ascend_speed'), unit=' m/min')} "
         f"({ASCENT_WINDOW_S:.0f} s average)",
         f"fast-ascent episodes {int(row.get('high_ascend_speed_count') or 0)}",
+        f"fastest surfacing through the last {SHALLOW_ZONE_M:.0f} m "
+        f"{fmt(row.get('max_shallow_ascend_speed'), unit=' m/min')}",
+        f"fast surfacings {int(row.get('shallow_bolt_count') or 0)}",
     ]
     if measured(row.get("min_ndl")):
         parts.append(f"minimum NDL {fmt(row['min_ndl'], '.0f', ' min')}")
@@ -127,6 +132,16 @@ def dive_issues(row) -> list[str]:
             f"HIGH ASCENT RATE: Max ascent rate was {row['max_ascend_speed']:.1f} m/min "
             f"averaged over {ASCENT_WINDOW_S:.0f} s (recommended: <{ASCENT_LIMIT_M_MIN:.0f} "
             f"m/min), in {episodes} separate fast-ascent episode(s)."
+        )
+    if row.get("max_shallow_ascend_speed", 0) > SHALLOW_ASCENT_LIMIT_M_MIN:
+        bolts = int(row.get("shallow_bolt_count") or 0)
+        issues.append(
+            f"BOLTED TO THE SURFACE: fastest approach through the last "
+            f"{SHALLOW_ZONE_M:.0f} m was {row['max_shallow_ascend_speed']:.1f} m/min "
+            f"(recommended: <{SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min), on {bolts} "
+            f"surfacing(s). The relative pressure drop is largest in the last metres "
+            f"(8 m to the surface is 1.8 to 1.0 bar), so this is where a fast ascent "
+            f"matters most."
         )
     if row.get("entered_deco"):
         issues.append(
@@ -255,9 +270,14 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
 
     ndl = features["min_ndl"]
     sac = features["sac_rate"]
+    surfacing = features["max_shallow_ascend_speed"]
     concern_lines = [
-        f"High ascent rate (>{ASCENT_LIMIT_M_MIN:.0f} m/min): "
+        f"High sustained ascent rate (>{ASCENT_LIMIT_M_MIN:.0f} m/min over "
+        f"{ASCENT_WINDOW_S:.0f} s): "
         f"{_pct(int((features['max_ascend_speed'] > ASCENT_LIMIT_M_MIN).sum()), n)}",
+        f"Bolted to the surface (>{SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min through "
+        f"the last {SHALLOW_ZONE_M:.0f} m): "
+        f"{_pct(int((surfacing > SHALLOW_ASCENT_LIMIT_M_MIN).sum()), n)}",
         f"Entered decompression: {_pct(int(features['entered_deco'].sum()), n)}",
         f"Low NDL (<{NDL_DANGER_MIN:.0f} min): "
         f"{_pct(int((ndl < NDL_DANGER_MIN).sum()), cov['ndl'], 'dives with NDL')}",
@@ -266,11 +286,11 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"Deep dives (>{DEEP_M:.0f}m): {_pct(int((features['max_depth'] > DEEP_M).sum()), n)}",
     ]
 
-    worst = features.nlargest(3, "max_ascend_speed")
-    offender_lines = [
-        f"  #{row['dive_number']} {_location(row)}: {row['max_ascend_speed']:.1f} m/min"
-        for _, row in worst.iterrows()
-    ]
+    def _offenders(col: str) -> list[str]:
+        return [
+            f"  #{row['dive_number']} {_location(row)}: {row[col]:.1f} m/min"
+            for _, row in features.nlargest(3, col).iterrows()
+        ]
 
     return "\n".join(
         [
@@ -282,8 +302,11 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
             "Safety Concerns:",
             *[f"  {line}" for line in concern_lines],
             "",
-            "Top Worst Offenders (ascent speed):",
-            *offender_lines,
+            f"Top Worst Offenders (sustained ascent, {ASCENT_WINDOW_S:.0f} s):",
+            *_offenders("max_ascend_speed"),
+            "",
+            f"Top Worst Offenders (surfacing through the last {SHALLOW_ZONE_M:.0f} m):",
+            *_offenders("max_shallow_ascend_speed"),
             "",
             coverage_line(features),
         ]
@@ -300,6 +323,9 @@ def build_anomaly_keywords(features: pd.DataFrame | None) -> str:
     keywords: list[str] = []
     if features["max_ascend_speed"].max() > ASCENT_LIMIT_M_MIN:
         keywords.append("rapid ascent decompression sickness")
+    shallow = features.get("max_shallow_ascend_speed")
+    if shallow is not None and shallow.max() > SHALLOW_ASCENT_LIMIT_M_MIN:
+        keywords.append("fast final ascent to surface safety stop skipped")
     entered_deco = "entered_deco" in features.columns and features["entered_deco"].any()
     if entered_deco or (features["min_ndl"] < 1).any():
         keywords.append("close to deco stop NDL almost zero recreational limit")
