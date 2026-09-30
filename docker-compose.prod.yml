@@ -47,10 +47,13 @@ services:
     restart: unless-stopped
 
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:version-20.16.0  # pinned; was :latest
     container_name: diveroast-phoenix
-    # NOT exposed externally — access via SSH tunnel:
+    # Published on the VPS loopback only, NOT exposed externally. Without a
+    # published port the SSH tunnel had nothing to reach. Access via:
     #   ssh -L 6006:localhost:6006 root@<vps-ip>
+    ports:
+      - "127.0.0.1:6006:6006"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006/healthz')"]
       interval: 10s

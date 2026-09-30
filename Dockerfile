@@ -20,13 +20,14 @@ RUN uv pip install --system .
 # downloads on Cloud Run cold starts (no outbound internet in production).
 RUN uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('Cross-encoder cached')"
 
-# Create dlt config (embedding provider must be set before ingestion)
+# Create dlt config (embedding provider must be set before ingestion).
+# dlt telemetry is off: the server has no reason to report usage to dltHub.
 RUN mkdir -p .dlt \
-    && printf '[runtime]\ndlthub_telemetry = true\n' > .dlt/config.toml \
+    && printf '[runtime]\ndlthub_telemetry = false\n' > .dlt/config.toml \
     && printf '[destination.lancedb]\nembedding_model_provider = "sentence-transformers"\nembedding_model = "all-MiniLM-L6-v2"\n\n[destination.lancedb.credentials]\nuri = ".lancedb"\n' > .dlt/secrets.toml
 
-# Copy pre-built LanceDB data (avoids sentence-transformers segfault under QEMU cross-compilation)
-COPY .lancedb/ .lancedb/
+# LanceDB data is not baked in: .dockerignore excludes .lancedb/ and both
+# compose files mount ./.lancedb at runtime. A COPY here fails on a clean clone.
 
 # Copy source last — only this layer busts on code changes.
 # All expensive layers above stay cached.

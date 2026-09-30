@@ -35,7 +35,7 @@ services:
     restart: on-failure:5
 
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:version-20.16.0
     container_name: diveroast-phoenix
     ports:
       - "6006:6006"
