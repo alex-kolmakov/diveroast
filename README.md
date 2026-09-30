@@ -108,7 +108,8 @@ src/
 ├── agent/         # Gemini client, system prompts, function-calling tools
 ├── analysis/      # Feature engineering (ascent speed, NDL, SAC rate)
 ├── api/           # FastAPI gateway with SSE streaming
-├── mcp/           # MCP server (7 tools via FastMCP)
+├── mcp/           # MCP server (8 tools via FastMCP)
+├── tools/         # Tool implementations shared by the agent and MCP server
 ├── parsers/       # Dive log parsing (ABC + Subsurface XML)
 ├── pipelines/     # CLI scripts for DAN ingestion & dive processing
 ├── rag/           # dlt pipeline + LanceDB hybrid search
