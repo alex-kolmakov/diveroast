@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
@@ -11,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 def _require_admin(x_admin_secret: str | None) -> None:
     """Raise 403 if the provided secret doesn't match settings.ADMIN_SECRET."""
-    if not settings.ADMIN_SECRET or x_admin_secret != settings.ADMIN_SECRET:
+    if not settings.ADMIN_SECRET or not hmac.compare_digest(
+        (x_admin_secret or "").encode(), settings.ADMIN_SECRET.encode()
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
