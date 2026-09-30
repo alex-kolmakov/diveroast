@@ -17,6 +17,26 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+class RowFloorError(RuntimeError):
+    """A full rebuild produced too few rows to trust."""
+
+
+def check_row_floor(row_count: int, previous_count: int | None) -> None:
+    """Fail a full rebuild that came back suspiciously small.
+
+    Guards against the rebuild that isn't full: an incremental cursor left
+    over from an earlier run makes the source fetch only recent articles.
+    """
+    floor = settings.RAG_MIN_ROWS
+    if previous_count:
+        floor = max(floor, int(previous_count * settings.RAG_REBUILD_MIN_RATIO))
+    if row_count < floor:
+        raise RowFloorError(
+            f"Full rebuild produced {row_count} rows; expected at least {floor} "
+            f"(previous table: {previous_count}, RAG_MIN_ROWS={settings.RAG_MIN_ROWS})."
+        )
+
+
 class WordPressPaginator(PageNumberPaginator):
     """WordPress API returns 400 when requesting a page beyond the last one.
 
@@ -178,11 +198,15 @@ def run_pipeline(full_replace: bool = False):
 
     data = wordpress_rest_api_source() | dan_articles
 
+    db = lancedb.connect(settings.LANCEDB_URI)
+    previous_count: int | None = None
+    if settings.LANCEDB_TABLE_NAME in db.table_names():
+        previous_count = db.open_table(settings.LANCEDB_TABLE_NAME).count_rows()
+
     if full_replace:
         # Drop the table explicitly before running so Lance doesn't attempt
         # schema evolution (adding chunk_id to an existing nullable-free table
         # raises "All-null columns must be nullable").
-        db = lancedb.connect(settings.LANCEDB_URI)
         with contextlib.suppress(Exception):
             db.drop_table(settings.LANCEDB_TABLE_NAME)
         logger.info(
@@ -193,21 +217,31 @@ def run_pipeline(full_replace: bool = False):
     # merge: chunk_id (url + positional index) is the primary key.
     # Incremental source fetches only articles modified since the last run;
     # their chunks are upserted in-place. First run fetches everything.
-    # replace: full rebuild — use once to migrate schema on an existing table.
+    # replace: full rebuild. refresh="drop_sources" also resets dlt's
+    # incremental cursor; without it the "full" rebuild only refetches
+    # articles modified since the last run.
+    run_kwargs: dict[str, Any] = {"refresh": "drop_sources"} if full_replace else {}
     info = pipeline.run(
         lancedb_adapter(data, embed="value"),
         table_name="texts",
         write_disposition=write_disposition,
+        **run_kwargs,
     )
 
     logger.info("Pipeline load info: %s", info)
 
     logger.info("Building FTS index...")
-    db = lancedb.connect(settings.LANCEDB_URI)
     dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
     dbtable.create_fts_index("value", replace=True)
 
     row_count = dbtable.count_rows()
-    logger.info("Done! Table '%s' has %d rows.", settings.LANCEDB_TABLE_NAME, row_count)
+    logger.info(
+        "Done! Table '%s' has %d rows (was %s).",
+        settings.LANCEDB_TABLE_NAME,
+        row_count,
+        previous_count,
+    )
+    if full_replace:
+        check_row_floor(row_count, previous_count)
 
     return settings.LANCEDB_TABLE_NAME
