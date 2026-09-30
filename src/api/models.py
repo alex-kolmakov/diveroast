@@ -22,24 +22,27 @@ class UploadResponse(BaseModel):
 
 
 class DiveFeature(BaseModel):
+    """Per-dive metrics. None means the dive computer didn't record it."""
+
     dive_number: str
     avg_depth: float
     max_depth: float
-    depth_variability: float
-    avg_temp: float
-    max_temp: float
-    min_temp: float
-    temp_gradient: float
-    temp_variability: float
-    avg_pressure: float
-    max_pressure: float
-    pressure_variability: float
-    min_ndl: float
-    sac_rate: float
-    rating: float
+    depth_variability: float | None
+    avg_temp: float | None
+    max_temp: float | None
+    min_temp: float | None
+    temp_gradient: float | None
+    temp_variability: float | None
+    avg_pressure: float | None
+    max_pressure: float | None
+    pressure_variability: float | None
+    min_ndl: float | None
+    entered_deco: bool = False  # default keeps pre-P1 snapshots loadable
+    sac_rate: float | None
+    rating: float | None
     max_ascend_speed: float
     high_ascend_speed_count: float
-    adverse_conditions: int
+    adverse_conditions: int | None  # None when the dive isn't rated
     dive_site_name: str
     trip_name: str
     latitude: float | None
@@ -53,11 +56,15 @@ class DiveMetricPoint(BaseModel):
 
 
 class MetricRange(BaseModel):
+    """Gauge data over the dives where this metric was recorded."""
+
     label: str
     unit: str
-    min_val: float
-    max_val: float
-    avg_val: float
+    recorded: int = 0  # dives with a value (0 in pre-P1 snapshots)
+    total: int = 0  # dives in the log (0 in pre-P1 snapshots)
+    min_val: float | None
+    max_val: float | None
+    avg_val: float | None
     worst_val: float | None
     safe_upper: float
     warning_upper: float
@@ -77,9 +84,10 @@ class ProblematicDive(BaseModel):
 class AggregateStats(BaseModel):
     total_dives: int
     avg_max_depth: float
-    avg_sac_rate: float
+    avg_sac_rate: float | None
     avg_max_ascend_speed: float
-    dives_with_adverse_conditions: int
+    dives_with_adverse_conditions: int  # rated below 3/5 by the diver
+    data_coverage: dict[str, int] = {}  # dives with each metric recorded
 
 
 class DiverProfile(BaseModel):
@@ -93,10 +101,14 @@ class DiverProfile(BaseModel):
 
 
 class DashboardResponse(BaseModel):
-    session_id: str
+    # Private session ID: present for the owner, stripped from shared snapshots.
+    session_id: str | None = None
+    # Public, read-only ID for /api/shared/{share_id}.
+    share_id: str | None = None
     aggregate_stats: AggregateStats
     metrics: list[MetricRange]
     all_dives: list[DiveFeature]
     top_problematic_dives: list[ProblematicDive]
     diver_profile: DiverProfile
     roast_summary: str | None = None
+    roast_prompt: str | None = None  # which system prompt wrote the roast

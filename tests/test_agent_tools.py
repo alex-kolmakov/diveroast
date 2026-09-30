@@ -1,6 +1,7 @@
 import pandas as pd
 
-from src.agent.tools import (
+from src.agent.tools import TOOL_FUNCTIONS
+from src.tools.dive import (
     analyze_all_dives,
     analyze_dive_profile,
     get_dive_summary,
@@ -29,7 +30,7 @@ def _make_dive_data():
 
 def test_get_dive_summary():
     df = _make_dive_data()
-    result = get_dive_summary("1", df.to_json())
+    result = get_dive_summary(df, "1")
 
     assert "Dive 1" in result
     assert "Reef Site" in result
@@ -40,27 +41,27 @@ def test_get_dive_summary():
 
 def test_get_dive_summary_not_found():
     df = _make_dive_data()
-    result = get_dive_summary("999", df.to_json())
+    result = get_dive_summary(df, "999")
     assert "No data found" in result
 
 
 def test_analyze_dive_profile_adverse():
     df = _make_dive_data()
-    result = analyze_dive_profile("2", df.to_json())
+    result = analyze_dive_profile(df, "2")
 
     assert "Dive 2" in result
-    assert "ADVERSE CONDITIONS" in result
+    assert "adverse conditions" in result
 
 
 def test_analyze_dive_profile_not_found():
     df = _make_dive_data()
-    result = analyze_dive_profile("999", df.to_json())
+    result = analyze_dive_profile(df, "999")
     assert "No data found" in result
 
 
 def test_list_dives():
     df = _make_dive_data()
-    result = list_dives(df.to_json())
+    result = list_dives(df)
 
     assert "Loaded dives (2)" in result
     assert "Reef Site" in result
@@ -72,7 +73,7 @@ def test_list_dives():
 
 def test_analyze_all_dives():
     df = _make_dive_data()
-    result = analyze_all_dives(df.to_json())
+    result = analyze_all_dives(df)
 
     assert "AGGREGATE DIVE ANALYSIS" in result
     assert "Overall Stats:" in result
@@ -83,5 +84,12 @@ def test_analyze_all_dives():
 
 def test_analyze_all_dives_empty():
     df = pd.DataFrame()
-    result = analyze_all_dives(df.to_json())
+    result = analyze_all_dives(df)
     assert "No dive data loaded" in result
+
+
+def test_agent_tool_functions_delegate_to_core():
+    """The agent's dispatch table calls the shared core with injected data."""
+    df = _make_dive_data()
+    result = TOOL_FUNCTIONS["analyze_dive_profile"](dive_number="2", dive_data=df)
+    assert result == analyze_dive_profile(df, "2")

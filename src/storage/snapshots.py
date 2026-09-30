@@ -17,14 +17,6 @@ class SnapshotStore:
     async def load(self, share_id: str) -> DashboardResponse | None:
         raise NotImplementedError
 
-    async def update_roast(self, share_id: str, roast_text: str) -> None:
-        data = await self.load(share_id)
-        if data is None:
-            logger.warning("Cannot update roast: snapshot %s not found", share_id)
-            return
-        data.roast_summary = roast_text
-        await self.save(share_id, data)
-
 
 class LocalSnapshotStore(SnapshotStore):
     """Stores snapshots as JSON files on the local filesystem."""

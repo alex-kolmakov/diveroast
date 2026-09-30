@@ -83,8 +83,10 @@ class TestComputeDangerScore:
             "adverse_conditions": 1,
         }
         score = _compute_danger_score(row)
-        # NDL danger: 3*2=6, ascent danger: 2*2=4, SAC danger: 1*2=2, depth danger: 1*2=2, adverse: 5
-        assert score == 19.0
+        # NDL danger: 3*2=6, ascent danger: 2*2=4, SAC danger: 1*2=2, depth danger: 1*2=2.
+        # The diver's rating isn't scored.
+        assert score == 14.0
+        assert _compute_danger_score({**row, "adverse_conditions": 0}) == score
 
     def test_warning_level(self):
         row = {
@@ -220,7 +222,9 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
         assert "unit" in metric
         assert "per_dive" in metric
         assert "worst_val" in metric
-        assert len(metric["per_dive"]) == stats["total_dives"]
+        assert metric["total"] == stats["total_dives"]
+        # Only dives that recorded the metric are plotted.
+        assert len(metric["per_dive"]) == metric["recorded"] <= metric["total"]
         for pt in metric["per_dive"]:
             assert "dive_number" in pt
             assert "value" in pt

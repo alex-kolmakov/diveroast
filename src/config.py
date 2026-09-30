@@ -19,9 +19,25 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 50  # was 100 — reduced proportionally
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     ENABLE_RERANKING: bool = True  # set False in tests / offline environments
+    # Cross-encoder logit floor (only applied with reranking on). Measured on
+    # the local index: on-topic best hits score -4..+2, off-topic ~-11.
+    RAG_MIN_RELEVANCE: float = -5.0
+    # Full rebuild fails if it yields fewer rows than this, or less than
+    # RAG_REBUILD_MIN_RATIO of the previous table.
+    RAG_MIN_ROWS: int = 1000
+    RAG_REBUILD_MIN_RATIO: float = 0.8
 
     # Prompt
     PROMPT_VERSION: int = 4
+
+    # Agent loop
+    AGENT_MAX_STEPS: int = 8  # tool rounds per message before forcing an answer
+    AGENT_TOOL_TEMPERATURE: float = 0.2  # first round: picking tools
+    AGENT_TEMPERATURE: float = 0.8  # later rounds: writing the answer
+
+    # Sessions (in-memory)
+    SESSION_TTL_SECONDS: int = 6 * 60 * 60
+    MAX_SESSIONS: int = 500
 
     # Phoenix
     PHOENIX_COLLECTOR_ENDPOINT: str = "http://localhost:6006/v1/traces"

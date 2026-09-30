@@ -1,242 +1,18 @@
-import contextlib
-import io
+"""Gemini function-calling surface for the DiveRoast agent.
 
-import pandas as pd
+The implementations live in ``src.tools`` (shared with the MCP server). Dive
+tools take the session's parsed DataFrame and its precomputed features,
+injected by ``DiverRoastAgent._execute_tool``.
+"""
+
 from google.genai import types
 
-from src.analysis.feature_engineering import extract_features
-from src.observability import get_tracer
-from src.rag.search import create_text_report, retrieve_context
+from src.tools import dan, dive
 
-# --- Tool implementations ---
-
-
-def search_dan_incidents(query: str) -> str:
-    """Search the DAN database for diving incident reports matching the query."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.search_dan_incidents",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        prefixed_query = f"diving incident: {query}"
-        return retrieve_context(prefixed_query)
-
-
-def search_dan_guidelines(query: str) -> str:
-    """Search the DAN database for diving safety guidelines matching the query."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.search_dan_guidelines",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        prefixed_query = f"diving safety guideline: {query}"
-        return retrieve_context(prefixed_query)
-
-
-def _filter_dive(df: pd.DataFrame, dive_number: str) -> pd.DataFrame:
-    """Filter a DataFrame to rows matching dive_number, handling type coercion."""
-    # dive_number column may be int or str depending on JSON round-trip
-    result = df[df["dive_number"] == dive_number]
-    if result.empty:
-        with contextlib.suppress(ValueError, TypeError):
-            result = df[df["dive_number"] == int(dive_number)]
-    return result
-
-
-def analyze_dive_profile(dive_number: str, dive_data_json: str) -> str:
-    """Analyze a specific dive's profile and flag safety issues."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.analyze_dive_profile",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        df = pd.read_json(io.StringIO(dive_data_json))
-        dive_df = _filter_dive(df, dive_number)
-
-        if dive_df.empty:
-            return f"No data found for dive number {dive_number}."
-
-        features = extract_features(dive_df)
-        if features.empty:
-            return f"Could not extract features for dive {dive_number}."
-
-        row = features.iloc[0]
-        issues = []
-
-        if row.get("max_ascend_speed", 0) > 10:
-            issues.append(
-                f"HIGH ASCENT RATE: Max ascent speed was {row['max_ascend_speed']:.1f} m/min "
-                f"(recommended: <10 m/min). {int(row.get('high_ascend_speed_count', 0))} "
-                f"instances of excessive speed detected."
-            )
-        if row.get("min_ndl", float("inf")) < 5:
-            issues.append(
-                f"DANGEROUSLY LOW NDL: Minimum NDL dropped to {row['min_ndl']:.0f} minutes. "
-                f"This is cutting it extremely close to mandatory decompression."
-            )
-        if row.get("sac_rate", 0) > 20:
-            issues.append(
-                f"HIGH AIR CONSUMPTION: SAC rate of {row['sac_rate']:.1f} l/min is above average. "
-                f"Consider working on breathing technique and buoyancy."
-            )
-        if row.get("max_depth", 0) > 30:
-            issues.append(
-                f"DEEP DIVE: Maximum depth of {row['max_depth']:.1f}m. "
-                f"Ensure you have appropriate training and gas planning for this depth."
-            )
-        if row.get("adverse_conditions", 0) == 1:
-            issues.append(
-                "This dive was flagged as having ADVERSE CONDITIONS (rating < 3)."
-            )
-
-        summary = create_text_report(row.to_dict())
-        if issues:
-            return (
-                f"Dive {dive_number} Analysis:\n{summary}\n\nIssues Found:\n"
-                + "\n".join(f"- {issue}" for issue in issues)
-            )
-        else:
-            return f"Dive {dive_number} Analysis:\n{summary}\n\nNo major safety issues detected. Dive looks clean."
-
-
-def list_dives(dive_data_json: str) -> str:
-    """List all dives in the loaded dive log with basic info."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.list_dives",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        df = pd.read_json(io.StringIO(dive_data_json))
-        if df.empty:
-            return "No dive data loaded."
-        dive_nums = sorted(df["dive_number"].unique().tolist())
-        lines = []
-        for dn in dive_nums:
-            dive_df = _filter_dive(df, str(dn))
-            first = dive_df.iloc[0]
-            site = first.get("dive_site_name", "Unknown")
-            max_depth = dive_df["depth"].max()
-            rating = first.get("rating", "N/A")
-            lines.append(f"  #{dn}: {site} — {max_depth:.1f}m max — rating {rating}/5")
-        return f"Loaded dives ({len(dive_nums)}):\n" + "\n".join(lines)
-
-
-def analyze_all_dives(dive_data_json: str) -> str:
-    """Analyze all dives together: aggregate stats, safety concerns, worst offenders."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.analyze_all_dives",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        df = pd.read_json(io.StringIO(dive_data_json))
-        if df.empty:
-            return "No dive data loaded."
-
-        features = extract_features(df)
-        if features.empty:
-            return "Could not extract features from dive data."
-
-        n = len(features)
-
-        # Overall stats
-        avg_max_depth = features["max_depth"].mean()
-        deepest = features["max_depth"].max()
-        deepest_dive = features.loc[features["max_depth"].idxmax(), "dive_number"]
-        avg_rating = features["rating"].mean() if "rating" in features.columns else None
-        avg_sac = (
-            features["sac_rate"].mean()
-            if "sac_rate" in features.columns and features["sac_rate"].notna().any()
-            else None
-        )
-
-        stats_lines = [
-            f"Total dives: {n}",
-            f"Avg max depth: {avg_max_depth:.1f}m",
-            f"Deepest dive: #{deepest_dive} at {deepest:.1f}m",
-        ]
-        if avg_sac is not None:
-            stats_lines.append(f"Avg SAC rate: {avg_sac:.1f} l/min")
-        if avg_rating is not None:
-            stats_lines.append(f"Avg rating: {avg_rating:.1f}/5")
-
-        # Safety concerns
-        high_ascent = (features["max_ascend_speed"] > 10).sum()
-        low_ndl = (features["min_ndl"] < 5).sum()
-        high_sac = (
-            (features["sac_rate"] > 20).sum() if "sac_rate" in features.columns else 0
-        )
-        deep = (features["max_depth"] > 30).sum()
-        adverse = (
-            (features["adverse_conditions"] == 1).sum()
-            if "adverse_conditions" in features.columns
-            else 0
-        )
-
-        def _pct(count: int) -> str:
-            return f"{count}/{n} ({count * 100 // n}%)"
-
-        concern_lines = [
-            f"High ascent rate (>10 m/min): {_pct(high_ascent)}",
-            f"Low NDL (<5 min): {_pct(low_ndl)}",
-            f"High SAC (>20 l/min): {_pct(high_sac)}",
-            f"Deep dives (>30m): {_pct(deep)}",
-            f"Adverse conditions: {_pct(adverse)}",
-        ]
-
-        # Top 3 worst offenders by ascent speed
-        worst = features.nlargest(3, "max_ascend_speed")[
-            ["dive_number", "max_ascend_speed"]
-        ]
-        offender_lines = [
-            f"  #{int(row['dive_number'])}: {row['max_ascend_speed']:.1f} m/min"
-            for _, row in worst.iterrows()
-        ]
-
-        sections = [
-            "=== AGGREGATE DIVE ANALYSIS ===",
-            "",
-            "Overall Stats:",
-            *[f"  {line}" for line in stats_lines],
-            "",
-            "Safety Concerns:",
-            *[f"  {line}" for line in concern_lines],
-            "",
-            "Top Worst Offenders (ascent speed):",
-            *offender_lines,
-        ]
-        return "\n".join(sections)
-
-
-def get_dive_summary(dive_number: str, dive_data_json: str) -> str:
-    """Get a summary of a specific dive including location, depth, duration, and rating."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.get_dive_summary",
-        attributes={"openinference.span.kind": "TOOL"},
-    ):
-        df = pd.read_json(io.StringIO(dive_data_json))
-        dive_df = _filter_dive(df, dive_number)
-
-        if dive_df.empty:
-            return f"No data found for dive number {dive_number}."
-
-        first_row = dive_df.iloc[0]
-        max_depth = dive_df["depth"].max()
-        duration = dive_df["time"].max()
-        sac_rate = first_row.get("sac_rate", "N/A")
-        rating = first_row.get("rating", "N/A")
-        site = first_row.get("dive_site_name", "Unknown")
-        trip = first_row.get("trip_name", "Unknown")
-
-        return (
-            f"Dive {dive_number}:\n"
-            f"  Location: {site} ({trip})\n"
-            f"  Max Depth: {max_depth:.1f}m\n"
-            f"  Duration: {duration:.0f} seconds\n"
-            f"  SAC Rate: {sac_rate}\n"
-            f"  Rating: {rating}/5"
-        )
-
+# Tools that need the session's dive data injected as ``dive_data``/``features``
+DIVE_DATA_TOOLS = frozenset(
+    {"analyze_dive_profile", "get_dive_summary", "list_dives", "analyze_all_dives"}
+)
 
 # --- Gemini function declarations ---
 
@@ -271,7 +47,7 @@ TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="analyze_dive_profile",
-        description="Analyze a specific dive's profile data and flag any safety issues like high ascent rate, low NDL, or high air consumption. The dive data is automatically available from the uploaded dive log.",
+        description="Analyze a specific dive's profile data and flag any safety issues like high ascent rate, low NDL, deco entry, or high air consumption. Metrics the dive computer did not record are reported as not recorded. The dive data is automatically available from the uploaded dive log.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -316,10 +92,16 @@ TOOL_DECLARATIONS = [
 ]
 
 TOOL_FUNCTIONS = {
-    "search_dan_incidents": search_dan_incidents,
-    "search_dan_guidelines": search_dan_guidelines,
-    "analyze_dive_profile": analyze_dive_profile,
-    "get_dive_summary": get_dive_summary,
-    "list_dives": list_dives,
-    "analyze_all_dives": analyze_all_dives,
+    "search_dan_incidents": dan.search_dan_incidents,
+    "search_dan_guidelines": dan.search_dan_guidelines,
+    "analyze_dive_profile": lambda dive_number, dive_data, features=None: (
+        dive.analyze_dive_profile(dive_data, dive_number, features)
+    ),
+    "get_dive_summary": lambda dive_number, dive_data, features=None: (
+        dive.get_dive_summary(dive_data, dive_number, features)
+    ),
+    "list_dives": lambda dive_data, features=None: dive.list_dives(dive_data, features),
+    "analyze_all_dives": lambda dive_data, features=None: dive.analyze_all_dives(
+        dive_data, features
+    ),
 }

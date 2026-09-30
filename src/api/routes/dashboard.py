@@ -1,10 +1,11 @@
 import json
 import logging
+from typing import cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from src.agent.gemini_client import get_client
-from src.analysis.feature_engineering import extract_features
+from src.analysis.feature_engineering import data_coverage, extract_features
 from src.api.dependencies import get_session, get_snapshot_store
 from src.api.models import (
     AggregateStats,
@@ -17,6 +18,7 @@ from src.api.models import (
 )
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
+from src.tools.dive import fmt, measured
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,16 +45,16 @@ PICK_REASONS = {
     "low NDL": "Closest to decompression limit",
     "high air consumption": "Highest air consumption",
     "deep dive": "Deepest dive with issues",
-    "adverse conditions": "Worst conditions",
 }
 
 # Which metric to rank by for each issue (and whether higher or lower is worse)
+# The diver's star rating is not a pick category: it's subjective, and the
+# RAG keywords exclude it for the same reason.
 ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
     "rapid ascent": ("max_ascend_speed", True),  # higher is worse
-    "low NDL": ("min_ndl", False),  # lower is worse
+    "low NDL": ("ndl_rank", False),  # lower is worse; deco entry ranks lowest
     "high air consumption": ("sac_rate", True),  # higher is worse
     "deep dive": ("max_depth", True),  # higher is worse
-    "adverse conditions": ("adverse_conditions", True),  # higher is worse
 }
 
 # Region bounding boxes: (lat_min, lat_max, lon_min, lon_max)
@@ -115,19 +117,29 @@ def _classify_single_value(
     return _classify_zone(value, safe_up, warn_up)
 
 
+def _r(value, ndigits: int = 2) -> float | None:
+    """Round a recorded value; None if it wasn't recorded."""
+    return round(float(value), ndigits) if measured(value) else None
+
+
 def _build_metrics(features_df) -> list[MetricRange]:
+    """Gauge data per metric, over only the dives that recorded it."""
     metrics = []
+    total = len(features_df)
     for col, (label, unit, safe_up, warn_up) in THRESHOLDS.items():
         if col not in features_df.columns:
             continue
-        series = features_df[col]
-        min_val = float(series.min())
-        max_val = float(series.max())
-        avg_val = float(series.mean())
+        series = features_df[col].dropna()
+        recorded = len(series)
+        min_val = float(series.min()) if recorded else None
+        max_val = float(series.max()) if recorded else None
+        avg_val = float(series.mean()) if recorded else None
 
         # Build per-dive values, sorted by value
         per_dive = []
         for _, row in features_df.iterrows():
+            if not measured(row[col]):
+                continue
             val = float(row[col])
             pt_zone = _classify_single_value(col, val, safe_up, warn_up)
             per_dive.append(
@@ -139,66 +151,67 @@ def _build_metrics(features_df) -> list[MetricRange]:
             )
         per_dive.sort(key=lambda p: p.value)
 
+        common = {
+            "label": label,
+            "unit": unit,
+            "recorded": recorded,
+            "total": total,
+            "min_val": min_val,
+            "max_val": max_val,
+            "avg_val": avg_val,
+            "per_dive": per_dive,
+        }
         if col == "min_ndl":
-            zone = _classify_ndl_zone(min_val)
-            worst_val = min_val  # lower is worse for NDL
             metrics.append(
                 MetricRange(
-                    label=label,
-                    unit=unit,
-                    min_val=min_val,
-                    max_val=max_val,
-                    avg_val=avg_val,
-                    worst_val=worst_val,
+                    **common,
+                    worst_val=min_val,  # lower is worse for NDL
                     safe_upper=NDL_SAFE_LOWER,
                     warning_upper=NDL_WARNING_LOWER,
-                    zone=zone,
-                    per_dive=per_dive,
+                    zone=_classify_ndl_zone(min_val) if min_val is not None else "safe",
                 )
             )
         elif col == "avg_temp":
-            zone = _classify_temp_zone(min_val)
             metrics.append(
                 MetricRange(
-                    label=label,
-                    unit=unit,
-                    min_val=min_val,
-                    max_val=max_val,
-                    avg_val=avg_val,
+                    **common,
                     worst_val=None,  # temperature is informational
                     safe_upper=TEMP_COLD_WARNING,
                     warning_upper=0.0,
-                    zone=zone,
-                    per_dive=per_dive,
+                    zone=_classify_temp_zone(min_val)
+                    if min_val is not None
+                    else "safe",
                 )
             )
         else:
             assert safe_up is not None and warn_up is not None
-            zone = _classify_zone(max_val, safe_up, warn_up)
-            worst_val = max_val  # higher is worse for depth, ascent speed, SAC
             metrics.append(
                 MetricRange(
-                    label=label,
-                    unit=unit,
-                    min_val=min_val,
-                    max_val=max_val,
-                    avg_val=avg_val,
-                    worst_val=worst_val,
+                    **common,
+                    worst_val=max_val,  # higher is worse for depth, ascent, SAC
                     safe_upper=safe_up,
                     warning_upper=warn_up,
-                    zone=zone,
-                    per_dive=per_dive,
+                    zone=_classify_zone(max_val, safe_up, warn_up)
+                    if max_val is not None
+                    else "safe",
                 )
             )
     return metrics
 
 
 def _compute_danger_score(row) -> float:
+    """Step-weighted danger score from measured metrics only.
+
+    Unrecorded metrics contribute nothing. The diver's star rating isn't
+    scored: it's subjective (see ISSUE_RANK_KEY).
+    """
     score = 0.0
-    # NDL: lower is worse (weight 3)
-    if row.get("min_ndl", 999) < NDL_WARNING_LOWER:
+    # NDL: lower is worse (weight 3). A computer-flagged deco entry is the
+    # worst case.
+    ndl = row.get("min_ndl")
+    if row.get("entered_deco") or (measured(ndl) and ndl < NDL_WARNING_LOWER):
         score += 3.0 * 2
-    elif row.get("min_ndl", 999) < NDL_SAFE_LOWER:
+    elif measured(ndl) and ndl < NDL_SAFE_LOWER:
         score += 3.0
 
     # Ascent speed (weight 2)
@@ -209,10 +222,10 @@ def _compute_danger_score(row) -> float:
         score += 2.0
 
     # SAC rate (weight 1)
-    sac = row.get("sac_rate", 0)
-    if sac > 20:
+    sac = row.get("sac_rate")
+    if measured(sac) and sac > 20:
         score += 1.0 * 2
-    elif sac > 15:
+    elif measured(sac) and sac > 15:
         score += 1.0
 
     # Depth (weight 1)
@@ -222,10 +235,6 @@ def _compute_danger_score(row) -> float:
     elif depth > 18:
         score += 1.0
 
-    # Adverse conditions (weight 5)
-    if row.get("adverse_conditions", 0):
-        score += 5.0
-
     return score
 
 
@@ -233,13 +242,16 @@ def _identify_issues(row) -> list[str]:
     issues = []
     if row.get("max_ascend_speed", 0) > 9:
         issues.append("rapid ascent")
-    if row.get("min_ndl", 999) < NDL_SAFE_LOWER:
+    ndl = row.get("min_ndl")
+    if row.get("entered_deco") or (measured(ndl) and ndl < NDL_SAFE_LOWER):
         issues.append("low NDL")
-    if row.get("sac_rate", 0) > 15:
+    sac = row.get("sac_rate")
+    if measured(sac) and sac > 15:
         issues.append("high air consumption")
     if row.get("max_depth", 0) > 30:
         issues.append("deep dive")
-    if row.get("adverse_conditions", 0):
+    adverse = row.get("adverse_conditions")
+    if measured(adverse) and adverse == 1:
         issues.append("adverse conditions")
     return issues
 
@@ -257,7 +269,9 @@ def _generate_dive_summaries(
         "You are a diving safety analyst. For each dive below, write ONE concise paragraph "
         "(30-50 words) explaining why it was picked as one of the worst dives. "
         "Reference the dive site by name, mention the specific numbers that are concerning, "
-        "and explain the real-world risk. Be direct and factual, not dramatic.\n"
+        "and explain the real-world risk. Be direct and factual, not dramatic. "
+        "Only quote numbers given below; a value marked 'not recorded' was not "
+        "logged, so say nothing about it.\n"
         "Return a JSON array of strings, one per dive, in the same order.\n"
     ]
     for i, d in enumerate(dives):
@@ -266,11 +280,12 @@ def _generate_dive_summaries(
             f"  Picked for: {d['pick_reason']}\n"
             f"  Issues: {', '.join(d['issues'])}\n"
             f"  Stats: max_depth={d['stats']['max_depth']:.1f}m, "
-            f"max_ascent={d['stats']['max_ascend_speed']:.1f} m/min, "
-            f"min_ndl={d['stats']['min_ndl']:.0f} min, "
-            f"sac_rate={d['stats']['sac_rate']:.1f} L/min, "
-            f"avg_temp={d['stats']['avg_temp']:.1f}°C, "
-            f"temp_gradient={d['stats']['temp_gradient']:.1f}°C"
+            f"max_ascent={d['stats']['max_ascend_speed']:.1f} m/min (30 s average), "
+            f"entered_deco={'yes' if d['stats'].get('entered_deco') else 'no'}, "
+            f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
+            f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "
+            f"avg_temp={fmt(d['stats'].get('avg_temp'), unit='°C')}, "
+            f"temp_gradient={fmt(d['stats'].get('temp_gradient'), unit='°C')}"
         )
 
     try:
@@ -342,8 +357,8 @@ def _build_diver_profile(features_df) -> DiverProfile:
 
     for _, row in features_df.iterrows():
         # Water type from temperature
-        avg_temp = float(row.get("avg_temp", 0))
-        if avg_temp > 0:
+        avg_temp = row.get("avg_temp")
+        if measured(avg_temp) and avg_temp > 0:
             water_type = _classify_water_type(avg_temp)
             water_types.add(water_type)
             if avg_temp > 24:
@@ -368,7 +383,7 @@ def _build_diver_profile(features_df) -> DiverProfile:
         # Region from coordinates
         lat = row.get("latitude")
         lon = row.get("longitude")
-        if lat is not None and lon is not None and lat != 0 and lon != 0:
+        if measured(lat) and measured(lon) and lat != 0 and lon != 0:
             region = _classify_region(float(lat), float(lon))
             if region:
                 regions.add(region)
@@ -391,46 +406,59 @@ async def get_dashboard(
     background_tasks: BackgroundTasks,
     store: SnapshotStore = Depends(get_snapshot_store),
 ):
-    """Compute dashboard data from session dive data. Saves a snapshot for sharing."""
+    """Compute dashboard data from session dive data.
+
+    Computed (and the Gemini summaries generated) once per uploaded log, then
+    served from the session cache. Saves a read-only snapshot under the
+    session's separate ``share_id`` for /api/shared/{share_id}.
+    """
     agent = get_session(session_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if agent.dive_data is None:
         raise HTTPException(status_code=400, detail="No dive data in session")
+    if agent.dashboard is not None:
+        return agent.dashboard.model_copy(update={"session_id": session_id})
 
     features_df = extract_features(agent.dive_data)
+    # Rank key for the "low NDL" pick: a deco entry is worse than any NDL.
+    features_df["ndl_rank"] = features_df["min_ndl"].where(
+        ~features_df["entered_deco"], -1.0
+    )
 
     # Build per-dive features list
     all_dives = []
     for _, row in features_df.iterrows():
         lat = row.get("latitude")
         lon = row.get("longitude")
+        adverse = row.get("adverse_conditions")
         all_dives.append(
             DiveFeature(
                 dive_number=str(row["dive_number"]),
                 avg_depth=round(float(row["avg_depth"]), 2),
                 max_depth=round(float(row["max_depth"]), 2),
-                depth_variability=round(float(row["depth_variability"]), 2),
-                avg_temp=round(float(row["avg_temp"]), 2),
-                max_temp=round(float(row["max_temp"]), 2),
-                min_temp=round(float(row["min_temp"]), 2),
-                temp_gradient=round(float(row["temp_gradient"]), 2),
-                temp_variability=round(float(row["temp_variability"]), 2),
-                avg_pressure=round(float(row["avg_pressure"]), 2),
-                max_pressure=round(float(row["max_pressure"]), 2),
-                pressure_variability=round(float(row["pressure_variability"]), 2),
-                min_ndl=round(float(row["min_ndl"]), 2),
-                sac_rate=round(float(row["sac_rate"]), 2),
-                rating=round(float(row["rating"]), 1),
+                depth_variability=_r(row["depth_variability"]),
+                avg_temp=_r(row["avg_temp"]),
+                max_temp=_r(row["max_temp"]),
+                min_temp=_r(row["min_temp"]),
+                temp_gradient=_r(row["temp_gradient"]),
+                temp_variability=_r(row["temp_variability"]),
+                avg_pressure=_r(row["avg_pressure"]),
+                max_pressure=_r(row["max_pressure"]),
+                pressure_variability=_r(row["pressure_variability"]),
+                min_ndl=_r(row["min_ndl"]),
+                entered_deco=bool(row["entered_deco"]),
+                sac_rate=_r(row["sac_rate"]),
+                rating=_r(row["rating"], 1),
                 max_ascend_speed=round(float(row["max_ascend_speed"]), 2),
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),
-                adverse_conditions=int(row["adverse_conditions"]),
+                adverse_conditions=int(cast(float, adverse))
+                if measured(adverse)
+                else None,
                 dive_site_name=str(row.get("dive_site_name", "N/A")),
                 trip_name=str(row.get("trip_name", "N/A")),
-                latitude=round(float(lat), 6) if lat is not None and lat != 0 else None,
-                longitude=round(float(lon), 6)
-                if lon is not None and lon != 0
-                else None,
+                latitude=_r(lat, 6) if measured(lat) and lat != 0 else None,
+                longitude=_r(lon, 6) if measured(lon) and lon != 0 else None,
             )
         )
 
@@ -441,9 +469,12 @@ async def get_dashboard(
     aggregate_stats = AggregateStats(
         total_dives=len(features_df),
         avg_max_depth=round(float(features_df["max_depth"].mean()), 2),
-        avg_sac_rate=round(float(features_df["sac_rate"].mean()), 2),
+        avg_sac_rate=_r(features_df["sac_rate"].mean()),
         avg_max_ascend_speed=round(float(features_df["max_ascend_speed"].mean()), 2),
-        dives_with_adverse_conditions=int(features_df["adverse_conditions"].sum()),
+        dives_with_adverse_conditions=int(
+            (features_df["adverse_conditions"] == 1).sum()
+        ),
+        data_coverage=data_coverage(features_df),
     )
 
     # Compute danger scores for all dives
@@ -466,23 +497,19 @@ async def get_dashboard(
 
     # First pass: for each issue category, pick the dive with the worst
     # value for that specific metric (not overall danger score)
-    for pick_issue in [
-        "rapid ascent",
-        "low NDL",
-        "high air consumption",
-        "deep dive",
-        "adverse conditions",
-    ]:
+    for pick_issue, (rank_col, higher_is_worse) in ISSUE_RANK_KEY.items():
         if len(picks) >= 3:
             break
-        rank_col, higher_is_worse = ISSUE_RANK_KEY[pick_issue]
         best: tuple[str, float, dict, list[str], str] | None = None
         best_metric_val: float = 0.0
         for dive_num, score, row_dict, issues in scored_dives:
             if dive_num in used_dive_nums:
                 continue
+            val = row_dict.get(rank_col)
+            if not measured(val):
+                continue
             if pick_issue in issues and pick_issue not in used_pick_issues:
-                val = float(row_dict.get(rank_col, 0))
+                val = float(cast(float, val))
                 if best is None or (
                     (higher_is_worse and val > best_metric_val)
                     or (not higher_is_worse and val < best_metric_val)
@@ -542,14 +569,20 @@ async def get_dashboard(
 
     response = DashboardResponse(
         session_id=session_id,
+        share_id=agent.share_id,
         aggregate_stats=aggregate_stats,
         metrics=metrics,
         all_dives=all_dives,
         top_problematic_dives=top_problematic_dives,
         diver_profile=diver_profile,
+        roast_summary=agent.roast_summary,
+        roast_prompt=agent.roast_prompt,
     )
+    agent.dashboard = response
 
-    # Persist snapshot so this session can be shared via /api/shared/{session_id}
-    background_tasks.add_task(store.save, session_id, response)
+    # Persist the public snapshot under the share ID, without the session ID
+    background_tasks.add_task(
+        store.save, agent.share_id, response.model_copy(update={"session_id": None})
+    )
 
     return response

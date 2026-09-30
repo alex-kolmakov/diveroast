@@ -66,7 +66,7 @@ def test_get_dive_summary_not_found():
 def test_analyze_dive_profile_adverse():
     result = analyze_dive_profile("2")
     assert "Dive 2" in result
-    assert "ADVERSE CONDITIONS" in result
+    assert "adverse conditions" in result
 
 
 def test_analyze_dive_profile_clean():
