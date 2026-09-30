@@ -1,4 +1,4 @@
-import type { DashboardData, UploadResponse } from "../types";
+import type { DashboardData, Source, UploadResponse } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -56,20 +56,13 @@ export function fetchSharedDashboard(shareId: string): Promise<DashboardData> {
   );
 }
 
-export async function saveRoastSummary(sessionId: string, roast: string): Promise<void> {
-  await fetch(`${API_BASE}/api/sessions/${sessionId}/roast`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ roast }),
-  });
-}
-
 export function createChatStream(
   message: string,
   sessionId: string,
   onChunk: (content: string) => void,
   onDone: () => void,
-  onError: (error: string) => void
+  onError: (error: string) => void,
+  onSources?: (sources: Source[]) => void
 ): AbortController {
   const controller = new AbortController();
 
@@ -80,6 +73,14 @@ export function createChatStream(
     signal: controller.signal,
   })
     .then((response) => {
+      if (!response.ok) {
+        onError(
+          response.status === 404
+            ? "Session expired. Upload your log again."
+            : `Chat failed (HTTP ${response.status})`
+        );
+        return;
+      }
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
@@ -102,6 +103,9 @@ export function createChatStream(
                 }
                 if (data.error) {
                   onError(data.error);
+                }
+                if (data.sources) {
+                  onSources?.(data.sources);
                 }
               } catch {
                 // Skip non-JSON lines

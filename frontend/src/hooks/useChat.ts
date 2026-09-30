@@ -50,6 +50,16 @@ export function useChat(sessionId: string | null) {
             return updated;
           });
           setIsLoading(false);
+        },
+        (sources) => {
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last.role === "assistant") {
+              updated[updated.length - 1] = { ...last, sources };
+            }
+            return updated;
+          });
         }
       );
     },

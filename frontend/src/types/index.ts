@@ -1,6 +1,12 @@
+export interface Source {
+  title: string;
+  url: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  sources?: Source[];
 }
 
 export interface UploadResponse {
@@ -19,25 +25,27 @@ export interface ChatRequest {
 
 export type AppPhase = "upload" | "analyzing" | "dashboard";
 
+/** Per-dive metrics. `null` means the dive computer didn't record it. */
 export interface DiveFeature {
   dive_number: string;
   avg_depth: number;
   max_depth: number;
-  depth_variability: number;
-  avg_temp: number;
-  max_temp: number;
-  min_temp: number;
-  temp_gradient: number;
-  temp_variability: number;
-  avg_pressure: number;
-  max_pressure: number;
-  pressure_variability: number;
-  min_ndl: number;
-  sac_rate: number;
-  rating: number;
+  depth_variability: number | null;
+  avg_temp: number | null;
+  max_temp: number | null;
+  min_temp: number | null;
+  temp_gradient: number | null;
+  temp_variability: number | null;
+  avg_pressure: number | null;
+  max_pressure: number | null;
+  pressure_variability: number | null;
+  min_ndl: number | null;
+  entered_deco: boolean;
+  sac_rate: number | null;
+  rating: number | null;
   max_ascend_speed: number;
   high_ascend_speed_count: number;
-  adverse_conditions: number;
+  adverse_conditions: number | null;
   dive_site_name: string;
   trip_name: string;
   latitude: number | null;
@@ -53,9 +61,11 @@ export interface DiveMetricPoint {
 export interface MetricRange {
   label: string;
   unit: string;
-  min_val: number;
-  max_val: number;
-  avg_val: number;
+  recorded: number; // dives with a value (0 in older shared snapshots)
+  total: number;
+  min_val: number | null;
+  max_val: number | null;
+  avg_val: number | null;
   worst_val: number | null;
   safe_upper: number;
   warning_upper: number;
@@ -75,9 +85,10 @@ export interface ProblematicDive {
 export interface AggregateStats {
   total_dives: number;
   avg_max_depth: number;
-  avg_sac_rate: number;
+  avg_sac_rate: number | null;
   avg_max_ascend_speed: number;
   dives_with_adverse_conditions: number;
+  data_coverage?: Record<string, number>;
 }
 
 export interface DiverProfile {
@@ -89,11 +100,13 @@ export interface DiverProfile {
 }
 
 export interface DashboardData {
-  session_id: string;
+  session_id: string | null; // private; null in shared snapshots
+  share_id?: string | null; // public, read-only
   aggregate_stats: AggregateStats;
   metrics: MetricRange[];
   all_dives: DiveFeature[];
   top_problematic_dives: ProblematicDive[];
   diver_profile: DiverProfile;
   roast_summary?: string | null;
+  roast_prompt?: string | null;
 }

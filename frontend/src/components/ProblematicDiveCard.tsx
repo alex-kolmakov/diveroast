@@ -85,12 +85,20 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
           </div>
           <div>
             <span className="text-muted-foreground">Min NDL: </span>
-            <span className="font-medium">{dive.features.min_ndl.toFixed(0)} min</span>
+            <span className="font-medium">
+              {dive.features.entered_deco
+                ? "entered deco"
+                : dive.features.min_ndl != null
+                  ? `${dive.features.min_ndl.toFixed(0)} min`
+                  : "not recorded"}
+            </span>
           </div>
           <div>
             <span className="text-muted-foreground">SAC rate: </span>
             <span className="font-medium">
-              {dive.features.sac_rate.toFixed(1)} L/min
+              {dive.features.sac_rate != null
+                ? `${dive.features.sac_rate.toFixed(1)} L/min`
+                : "not recorded"}
             </span>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { AnalyzingScreen } from "@/components/AnalyzingScreen";
 import { Dashboard } from "@/components/Dashboard";
 import { ChatDrawer } from "@/components/ChatDrawer";
 import { useChat } from "@/hooks/useChat";
-import { fetchDashboard, fetchSharedDashboard, saveRoastSummary } from "@/services/api";
+import { fetchDashboard, fetchSharedDashboard } from "@/services/api";
 import type { AppPhase, DashboardData, UploadResponse } from "@/types";
 
 // Detect /shared/:id in the URL at mount time (never changes for the lifetime of the page)
@@ -22,7 +22,6 @@ function App() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const roastFired = useRef(false);
-  const roastSaved = useRef(false);
 
   const { messages, isLoading, sendMessage } = useChat(sessionId);
 
@@ -84,19 +83,13 @@ function App() {
     );
   }, [phase, sessionId, sharedId, sendMessage]);
 
-  // Save roast to snapshot once streaming finishes (enables shared-view display)
-  useEffect(() => {
-    if (!sessionId || sharedId || roastSaved.current || isLoading) return;
-    const firstAssistant = messages.find((m) => m.role === "assistant");
-    if (!firstAssistant?.content) return;
-    roastSaved.current = true;
-    saveRoastSummary(sessionId, firstAssistant.content);
-  }, [isLoading, messages, sessionId, sharedId]);
+  // The server saves the roast into the shared snapshot itself.
 
-  // Build share URL from current session (shown as a button in the dashboard header)
-  const shareUrl = sessionId
-    ? `${window.location.origin}/shared/${sessionId}`
-    : undefined;
+  // Share URL uses the read-only share ID, never the private session ID
+  const shareUrl =
+    !sharedId && dashboardData?.share_id
+      ? `${window.location.origin}/shared/${dashboardData.share_id}`
+      : undefined;
 
   return (
     <div className="h-screen">

@@ -17,11 +17,35 @@ const ZONE_TEXT = {
   danger: "text-danger",
 };
 
+const fmt = (v: number | null) => (v == null ? "–" : v.toFixed(1));
+
+/** Metric the computer didn't log for any dive: say so instead of drawing a gauge. */
+function NotRecorded({ metric }: Props) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">{metric.label}</span>
+        <span className="text-sm text-muted-foreground">not recorded</span>
+      </div>
+      <div className="h-5 w-full rounded-full border border-dashed border-muted" />
+    </div>
+  );
+}
+
+/** "recorded for 141/197 dives" when some dives lack this metric. */
+function Coverage({ metric }: Props) {
+  if (!metric.total || metric.recorded >= metric.total) return null;
+  return (
+    <span className="text-xs text-muted-foreground">
+      recorded for {metric.recorded}/{metric.total} dives
+    </span>
+  );
+}
 
 function TemperatureGauge({ metric }: Props) {
   const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
   const dives = metric.per_dive;
-  if (dives.length === 0) return null;
+  if (dives.length === 0) return <NotRecorded metric={metric} />;
 
   const totalDives = dives.length;
   const segmentWidth = 100 / totalDives;
@@ -31,9 +55,10 @@ function TemperatureGauge({ metric }: Props) {
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">{metric.label}</span>
         <span className="text-sm font-semibold text-muted-foreground">
-          {metric.min_val.toFixed(1)}° – {metric.max_val.toFixed(1)}°
+          {fmt(metric.min_val)}° – {fmt(metric.max_val)}°
         </span>
       </div>
+      <Coverage metric={metric} />
 
       {/* Same equal-width segment bar as other metrics, colored by temperature band */}
       <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
@@ -91,7 +116,7 @@ export function RangeGauge({ metric }: Props) {
 
   const dives = metric.per_dive;
   const totalDives = dives.length;
-  if (totalDives === 0) return null;
+  if (totalDives === 0) return <NotRecorded metric={metric} />;
 
   // Each dive gets an equal-width segment of the bar
   const segmentWidth = 100 / totalDives;
@@ -103,9 +128,10 @@ export function RangeGauge({ metric }: Props) {
         <span className={`text-sm font-semibold ${ZONE_TEXT[metric.zone]}`}>
           {metric.worst_val != null
             ? `${metric.worst_val.toFixed(1)} ${metric.unit}`
-            : `${metric.min_val.toFixed(1)}° – ${metric.max_val.toFixed(1)}°`}
+            : `${fmt(metric.min_val)}° – ${fmt(metric.max_val)}°`}
         </span>
       </div>
+      <Coverage metric={metric} />
 
       {/* Gauge bar — each dive is a segment */}
       <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
@@ -149,9 +175,9 @@ export function RangeGauge({ metric }: Props) {
             Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(1)} {metric.unit}
           </span>
         ) : (
-          <span>Min: {metric.min_val.toFixed(1)}</span>
+          <span>Min: {fmt(metric.min_val)}</span>
         )}
-        {!hoveredDive && <span>Max: {metric.max_val.toFixed(1)}</span>}
+        {!hoveredDive && <span>Max: {fmt(metric.max_val)}</span>}
       </div>
     </div>
   );

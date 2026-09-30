@@ -99,7 +99,13 @@ export function UploadScreen({ onUploadComplete }: Props) {
           onChange={(e) => setDonate(e.target.checked)}
           className="h-4 w-4 rounded border-muted accent-primary"
         />
-        Donate my dive log to help improve DiveRoast
+        <span>
+          Donate my dive log to help improve DiveRoast
+          <span className="block text-xs">
+            The file is stored as uploaded, including GPS coordinates, dive dates and
+            site names.
+          </span>
+        </span>
       </label>
 
       {error && (

@@ -33,7 +33,9 @@ const STAT_ICONS = [
 export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
   const statValues = [
     data.aggregate_stats.avg_max_depth.toFixed(1),
-    data.aggregate_stats.avg_sac_rate.toFixed(1),
+    data.aggregate_stats.avg_sac_rate != null
+      ? data.aggregate_stats.avg_sac_rate.toFixed(1)
+      : "not recorded",
     data.aggregate_stats.avg_max_ascend_speed.toFixed(1),
     String(data.aggregate_stats.dives_with_adverse_conditions),
   ];
