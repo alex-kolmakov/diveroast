@@ -3,17 +3,17 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from src.parsers import PARSER_REGISTRY, get_parser
-from src.parsers.subsurface import extract_all_dive_profiles_refined, time_to_minutes
+from src.parsers.subsurface import extract_all_dive_profiles_refined, time_to_seconds
 
 FIXTURE_PATH = "tests/fixtures/anonymized_subsurface_export.ssrf"
 
 
-def test_time_to_minutes():
-    assert time_to_minutes("1:30") == 90
-    assert time_to_minutes("0:45") == 45
-    assert time_to_minutes("2:00") == 120
-    assert time_to_minutes("60") == 60.0
-    assert time_to_minutes("90") == 90.0
+def test_time_to_seconds():
+    assert time_to_seconds("1:30") == 90
+    assert time_to_seconds("0:45") == 45
+    assert time_to_seconds("2:00") == 120
+    assert time_to_seconds("60") == 60.0
+    assert time_to_seconds("90") == 90.0
 
 
 def test_extract_all_dive_profiles_refined():
@@ -34,6 +34,7 @@ def test_extract_all_dive_profiles_refined():
         "pressure",
         "rbt",
         "ndl",
+        "in_deco",
         "sac_rate",
         "rating",
         "latitude",

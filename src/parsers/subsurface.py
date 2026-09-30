@@ -1,13 +1,13 @@
 import contextlib
-import xml.etree.ElementTree as ET
 
 import pandas as pd
+from defusedxml import ElementTree as ET
 
 from src.parsers.base import DiveLogParser
 
 
-def time_to_minutes(time_str):
-    """Convert a time string (MM:SS or raw minutes) to total seconds as float."""
+def time_to_seconds(time_str):
+    """Convert a time string (MM:SS or raw seconds) to total seconds as float."""
     if ":" in time_str:
         parts = time_str.split(":")
         return int(parts[0]) * 60 + int(parts[1])
@@ -37,13 +37,13 @@ def extract_all_dive_profiles_refined(root):
             "latitude": lat,
             "longitude": lon,
         }
-    # Track dive sites outside of trip tags
+    # Map each <dive> element to its trip. Keyed by element, not by the
+    # number attribute, so unnumbered dives keep their trip name.
     trip_map = {}
     for trip in root.findall(".//trip"):
         trip_name = trip.attrib.get("location", "N/A")
         for dive in trip.findall("dive"):
-            dive_number = dive.attrib.get("number", "N/A")
-            trip_map[dive_number] = trip_name
+            trip_map[dive] = trip_name
     # Extract dive profiles
     _unnumbered_count = 0
     for dive in root.findall(".//dive"):
@@ -55,7 +55,7 @@ def extract_all_dive_profiles_refined(root):
             date = dive.attrib.get("date", "unknown")
             time = dive.attrib.get("time", str(_unnumbered_count)).replace(":", "")
             dive_number = f"unnum_{date}_{time}"
-        trip_name = trip_map.get(dive_number, "N/A")
+        trip_name = trip_map.get(dive, "N/A")
         dive_site_uuid = dive.attrib.get("divesiteid", "N/A")
         site_info = divesites.get(
             dive_site_uuid, {"name": "N/A", "latitude": None, "longitude": None}
@@ -90,17 +90,22 @@ def extract_all_dive_profiles_refined(root):
                 else None
             )
 
+            # Subsurface writes in_deco only when it changes: '1' on entering
+            # a deco obligation, '0' on clearing it.
+            in_deco = sample.attrib.get("in_deco")
+
             if time != "N/A" and depth != "N/A":
                 data_point = {
                     "dive_number": dive_number,
                     "trip_name": trip_name,
                     "dive_site_name": dive_site_name,
-                    "time": time_to_minutes(time),
+                    "time": time_to_seconds(time),
                     "depth": float(depth),
                     "temperature": float(temperature) if temperature else None,
                     "pressure": float(pressure) if pressure else None,
                     "rbt": float(rbt) if rbt else None,
                     "ndl": float(ndl) if ndl else None,
+                    "in_deco": int(in_deco) if in_deco is not None else None,
                     "sac_rate": float(sac_rate) if sac_rate != "N/A" else None,
                     "rating": int(rating) if rating and rating != "N/A" else None,
                     "latitude": latitude,
