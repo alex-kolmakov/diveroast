@@ -2,7 +2,11 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
-from src.analysis.feature_engineering import calculate_ascend_speed, extract_features
+from src.analysis.feature_engineering import (
+    calculate_ascend_speed,
+    clean_ndl,
+    extract_features,
+)
 from src.parsers.subsurface import extract_all_dive_profiles_refined
 
 FIXTURE_PATH = "tests/fixtures/anonymized_subsurface_export.ssrf"
@@ -123,3 +127,25 @@ def test_extract_features():
     assert 0 < features["adverse_conditions"].mean() < 1
     assert features["entered_deco"].sum() == 9
     assert features["max_ascend_speed"].between(0, 30).all()
+
+
+def test_ndl_sentinel_zeros_are_not_readings():
+    """Suunto-style 100 -> 0 -> 100 jumps are "not computed", not zero NDL."""
+    data = pd.DataFrame(
+        {
+            "dive_number": [1] * 7 + [2] * 4,
+            "time": [0, 10, 20, 30, 40, 50, 60, 0, 10, 20, 30],
+            # dive 1: surface sentinel, mid-dive sentinel; dive 2: real countdown
+            "ndl": [0, 100, 0, 100, 42, 0, 40, 9, 3, 1, 0],
+        }
+    )
+    cleaned = clean_ndl(data)
+    assert cleaned[data["dive_number"] == 1].min() == 40
+    assert cleaned[data["dive_number"] == 2].tolist() == [9, 3, 1, 0]
+
+
+def test_ndl_zero_after_a_gap_in_readings_counts_if_counting_down():
+    data = pd.DataFrame(
+        {"dive_number": [1] * 4, "time": [0, 10, 20, 30], "ndl": [2, None, None, 0]}
+    )
+    assert clean_ndl(data).tolist()[-1] == 0

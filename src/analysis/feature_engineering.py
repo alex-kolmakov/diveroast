@@ -8,6 +8,9 @@ SHALLOW_THRESHOLD_M = 2.0  # sensor noise dominates shallower than this
 FINAL_ASCENT_WINDOW_S = 60.0  # exclude the last minute before surfacing...
 FINAL_ASCENT_MAX_DEPTH_M = 6.0  # ...but only in the safety-stop band
 
+# An NDL of 0 is only a real reading if the computer counted down to it.
+NDL_COUNTDOWN_MAX_MIN = 5.0
+
 
 def _dive_ascent_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
     """Windowed ascent rate (m/min, positive = ascending) for one dive.
@@ -51,6 +54,23 @@ def _count_events(over: np.ndarray) -> int:
         return 0
     starts = over & ~np.concatenate(([False], over[:-1]))
     return int(starts.sum())
+
+
+def clean_ndl(data: pd.DataFrame) -> pd.Series:
+    """Per-sample NDL with sentinel zeros removed.
+
+    Some computers write ``ndl=0`` to mean "not computed" rather than "no
+    time left": Suunto D5 exports jump 100 -> 0 -> 100 at the surface and
+    mid-dive. A zero is kept only when the previous NDL reading in the same
+    dive was at most ``NDL_COUNTDOWN_MAX_MIN``, i.e. the computer counted
+    down to it. Expects ``data`` sorted by dive and time.
+    """
+    ndl = data["ndl"]
+    previous = data.groupby("dive_number")["ndl"].transform(
+        lambda s: s.ffill().shift(1)
+    )
+    sentinel = (ndl == 0) & ~(previous <= NDL_COUNTDOWN_MAX_MIN)
+    return ndl.mask(sentinel)
 
 
 def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
@@ -106,6 +126,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     data = df.sort_values(["dive_number", "time"])
     if "in_deco" not in data.columns:
         data = data.assign(in_deco=np.nan)
+    data = data.assign(ndl=clean_ndl(data))
     ascend_speed_features = calculate_ascend_speed(data)
 
     optional = {
