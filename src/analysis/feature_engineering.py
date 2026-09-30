@@ -103,25 +103,15 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def label_adverse_conditions(features_df: pd.DataFrame) -> pd.DataFrame:
-    """Label dives the diver rated below 3 stars.
-
-    Three-state: 1.0 (rated < 3), 0.0 (rated >= 3), NaN (not rated).
-    """
-    rating = features_df["rating"]
-    features_df["adverse_conditions"] = np.where(
-        rating.isna(), np.nan, (rating < 3).astype(float)
-    )
-    return features_df
-
-
 def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     """Extract per-dive features from a raw per-sample DataFrame.
 
     Metrics the log didn't record stay NaN: no mean fills and no zero fills.
     A dive without NDL readings has ``min_ndl`` NaN, a dive without a tank
-    pod has NaN pressure fields, and an unrated dive has NaN ``rating`` and
-    ``adverse_conditions``. Callers must treat NaN as "not recorded".
+    pod has NaN pressure fields. Callers must treat NaN as "not recorded".
+
+    Only signals any dive computer can produce are used: no star ratings or
+    other diver-entered fields.
     """
     data = df.sort_values(["dive_number", "time"])
     if "in_deco" not in data.columns:
@@ -150,7 +140,6 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             min_ndl=("ndl", "min"),
             deco_flag=("in_deco", "max"),
             sac_rate=("sac_rate", "first"),
-            rating=("rating", "first"),
             **optional,
         )
         .reset_index()
@@ -168,7 +157,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
         lower=0
     )
 
-    return label_adverse_conditions(features)
+    return features
 
 
 def data_coverage(features: pd.DataFrame) -> dict[str, int]:
@@ -178,5 +167,4 @@ def data_coverage(features: pd.DataFrame) -> dict[str, int]:
         "sac": int(features["sac_rate"].notna().sum()),
         "ndl": int(features["min_ndl"].notna().sum()),
         "pressure": int(features["avg_pressure"].notna().sum()),
-        "rating": int(features["rating"].notna().sum()),
     }

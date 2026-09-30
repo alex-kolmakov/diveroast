@@ -42,10 +42,8 @@ export interface DiveFeature {
   min_ndl: number | null;
   entered_deco: boolean;
   sac_rate: number | null;
-  rating: number | null;
   max_ascend_speed: number;
   high_ascend_speed_count: number;
-  adverse_conditions: number | null;
   dive_site_name: string;
   trip_name: string;
   latitude: number | null;
@@ -87,7 +85,7 @@ export interface AggregateStats {
   avg_max_depth: number;
   avg_sac_rate: number | null;
   avg_max_ascend_speed: number;
-  dives_with_adverse_conditions: number;
+  dives_with_fast_ascent?: number | null; // absent in older shared snapshots
   data_coverage?: Record<string, number>;
 }
 

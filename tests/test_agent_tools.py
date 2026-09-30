@@ -36,7 +36,7 @@ def test_get_dive_summary():
     assert "Reef Site" in result
     assert "Trip A" in result
     assert "15.0m" in result  # max depth
-    assert "4/5" in result  # rating
+    assert "Rating" not in result  # star ratings are not used
 
 
 def test_get_dive_summary_not_found():
@@ -45,12 +45,13 @@ def test_get_dive_summary_not_found():
     assert "No data found" in result
 
 
-def test_analyze_dive_profile_adverse():
-    df = _make_dive_data()
+def test_analyze_dive_profile_ignores_star_rating():
+    df = _make_dive_data()  # dive 2 is rated 2/5 in the raw data
     result = analyze_dive_profile(df, "2")
 
     assert "Dive 2" in result
-    assert "adverse conditions" in result
+    assert "rated" not in result.lower()
+    assert "adverse" not in result.lower()
 
 
 def test_analyze_dive_profile_not_found():

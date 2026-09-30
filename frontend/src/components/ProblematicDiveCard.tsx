@@ -20,6 +20,7 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
     ? `https://www.openstreetmap.org/export/embed.html?bbox=${Number(dive.features.longitude) - 0.35},${Number(dive.features.latitude) - 0.25},${Number(dive.features.longitude) + 0.35},${Number(dive.features.latitude) + 0.25}&layer=mapnik&marker=${dive.features.latitude},${dive.features.longitude}`
     : null;
 
+  // Older shared snapshots may still carry the retired rating-based issue
   const visibleIssues = dive.issues.filter((i) => i !== "adverse conditions");
 
   return (

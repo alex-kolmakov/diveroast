@@ -74,8 +74,8 @@ def coverage_line(features: pd.DataFrame) -> str:
     n = c["dives"]
     return (
         f"Data coverage: SAC available for {c['sac']}/{n} dives · "
-        f"NDL for {c['ndl']}/{n} · tank pressure for {c['pressure']}/{n} · "
-        f"rating for {c['rating']}/{n}. Metrics marked 'not recorded' were "
+        f"NDL for {c['ndl']}/{n} · tank pressure for {c['pressure']}/{n}. "
+        f"Metrics marked 'not recorded' were "
         f"not logged by the dive computer; don't estimate them."
     )
 
@@ -114,7 +114,6 @@ def _not_recorded(row) -> list[str]:
         "sac_rate": "SAC rate",
         "min_ndl": "NDL",
         "avg_pressure": "tank pressure",
-        "rating": "rating",
     }
     return [label for col, label in names.items() if not measured(row.get(col))]
 
@@ -149,11 +148,6 @@ def dive_issues(row) -> list[str]:
             f"DEEP DIVE: Maximum depth of {row['max_depth']:.1f}m. "
             f"Ensure you have appropriate training and gas planning for this depth."
         )
-    if measured(row.get("adverse_conditions")) and row["adverse_conditions"] == 1:
-        issues.append(
-            f"The diver rated this dive {row['rating']:.0f}/5 (below 3), which may "
-            f"indicate adverse conditions."
-        )
     return issues
 
 
@@ -185,7 +179,7 @@ def analyze_dive_profile(
 def get_dive_summary(
     df: pd.DataFrame, dive_number, features: pd.DataFrame | None = None
 ) -> str:
-    """Quick summary of one dive: location, depth, duration, SAC, rating."""
+    """Quick summary of one dive: location, depth, duration, SAC."""
     dive_df = filter_dive(df, dive_number)
     if dive_df.empty:
         return f"No data found for dive number {dive_number}."
@@ -195,20 +189,18 @@ def get_dive_summary(
     if row is None:
         return f"Could not extract features for dive {dive_number}."
 
-    rating = row.get("rating")
     return (
         f"Dive {dive_number}:\n"
         f"  Location: {_location(row)}\n"
         f"  Max Depth: {row['max_depth']:.1f}m\n"
         f"  Duration: {dive_df['time'].max() / 60:.0f} minutes\n"
         f"  SAC Rate: {fmt(row.get('sac_rate'), unit=' L/min')}\n"
-        f"  Rating: {f'{rating:.0f}/5' if measured(rating) else 'not rated'}\n"
         f"{coverage_line(features)}"
     )
 
 
 def list_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) -> str:
-    """List all dives with site, max depth, and rating."""
+    """List all dives with site and max depth."""
     if df.empty:
         return "No dive data loaded."
     if features is None:
@@ -219,11 +211,8 @@ def list_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) -> str:
     )
     lines = []
     for row in rows:
-        rating = row.get("rating")
-        rating_str = f"rating {rating:.0f}/5" if measured(rating) else "not rated"
         lines.append(
-            f"  #{row['dive_number']}: {_location(row)} — "
-            f"{row['max_depth']:.1f}m max — {rating_str}"
+            f"  #{row['dive_number']}: {_location(row)} — {row['max_depth']:.1f}m max"
         )
     return (
         f"Loaded dives ({len(rows)}):\n"
@@ -258,11 +247,6 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
             f"Avg SAC rate: {features['sac_rate'].mean():.1f} L/min "
             f"(over {cov['sac']} dives with SAC)"
         )
-    if cov["rating"]:
-        stats_lines.append(
-            f"Avg rating: {features['rating'].mean():.1f}/5 "
-            f"(over {cov['rating']} rated dives)"
-        )
 
     def _pct(count: int, of: int, what: str = "dives") -> str:
         if of == 0:
@@ -271,7 +255,6 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
 
     ndl = features["min_ndl"]
     sac = features["sac_rate"]
-    adverse = features["adverse_conditions"]
     concern_lines = [
         f"High ascent rate (>{ASCENT_LIMIT_M_MIN:.0f} m/min): "
         f"{_pct(int((features['max_ascend_speed'] > ASCENT_LIMIT_M_MIN).sum()), n)}",
@@ -281,8 +264,6 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"High SAC (>{SAC_HIGH_L_MIN:.0f} L/min): "
         f"{_pct(int((sac > SAC_HIGH_L_MIN).sum()), cov['sac'], 'dives with SAC')}",
         f"Deep dives (>{DEEP_M:.0f}m): {_pct(int((features['max_depth'] > DEEP_M).sum()), n)}",
-        f"Rated below 3/5 by the diver: "
-        f"{_pct(int((adverse == 1).sum()), cov['rating'], 'rated dives')}",
     ]
 
     worst = features.nlargest(3, "max_ascend_speed")
@@ -312,8 +293,7 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
 def build_anomaly_keywords(features: pd.DataFrame | None) -> str:
     """RAG-enriching keywords for anomalies actually measured in the log.
 
-    NaN never triggers a keyword. The diver's star rating is excluded: it's
-    subjective and adds noise to retrieval.
+    NaN never triggers a keyword.
     """
     if features is None or features.empty:
         return ""

@@ -158,7 +158,7 @@ def analyze_dive_profile(dive_number: str) -> str:
 
     Checks for: high ascent rates (>10 m/min over 30 s), deco entry,
     dangerously low NDL (<5 min), high air consumption (SAC >20 L/min),
-    deep dives (>30m), and a diver rating below 3. Metrics the dive computer
+    and deep dives (>30m). Metrics the dive computer
     didn't record are reported as not recorded.
     """
     return dive.analyze_dive_profile(_get_dive_data(), dive_number, _get_features())
@@ -166,7 +166,7 @@ def analyze_dive_profile(dive_number: str) -> str:
 
 @mcp.tool()
 def get_dive_summary(dive_number: str) -> str:
-    """Get a quick summary of a specific dive: location, depth, duration, SAC, rating."""
+    """Get a quick summary of a specific dive: location, depth, duration, SAC."""
     return dive.get_dive_summary(_get_dive_data(), dive_number, _get_features())
 
 

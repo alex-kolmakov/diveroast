@@ -18,7 +18,6 @@ def _make_features(
     min_ndl=10.0,
     sac_rate=15.0,
     max_depth=20.0,
-    adverse_conditions=False,
 ) -> pd.DataFrame:
     """Build a minimal features DataFrame for one dive."""
     return pd.DataFrame(
@@ -29,7 +28,6 @@ def _make_features(
                 "min_ndl": min_ndl,
                 "sac_rate": sac_rate,
                 "max_depth": max_depth,
-                "adverse_conditions": int(adverse_conditions),
             }
         ]
     )
@@ -86,14 +84,6 @@ def test_agent_keywords_deep_dive():
     assert "deep diving incident" in kw
 
 
-def test_agent_keywords_adverse_conditions_excluded():
-    """Low star rating must NOT inject 'adverse conditions' into RAG — subjective signal."""
-    agent = _make_agent(_make_features(adverse_conditions=True))
-    kw = agent._build_anomaly_keywords()
-    assert "adverse" not in kw.lower()
-    assert "conditions" not in kw.lower()
-
-
 def test_agent_keywords_clean_diver():
     """A diver with no anomalies should produce an empty keyword string."""
     agent = _make_agent(
@@ -102,7 +92,6 @@ def test_agent_keywords_clean_diver():
             min_ndl=10.0,
             sac_rate=12.0,
             max_depth=20.0,
-            adverse_conditions=False,
         )
     )
     assert agent._build_anomaly_keywords() == ""

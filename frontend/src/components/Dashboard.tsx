@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Anchor, ArrowUp, Wind, Thermometer, User, MapPin, Waves, Award } from "lucide-react";
+import { Anchor, ArrowUp, Wind, Thermometer, TriangleAlert, User, MapPin, Waves, Award } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { RangeGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
@@ -27,7 +27,7 @@ const STAT_ICONS = [
   { icon: Anchor, label: "Avg Max Depth", suffix: "m" },
   { icon: Wind, label: "Avg SAC Rate", suffix: "" },
   { icon: ArrowUp, label: "Avg Max Ascent", suffix: "" },
-  { icon: Thermometer, label: "Adverse Dives", suffix: "" },
+  { icon: TriangleAlert, label: "Fast Ascents (>10 m/min)", suffix: "" },
 ];
 
 export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
@@ -37,7 +37,9 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
       ? data.aggregate_stats.avg_sac_rate.toFixed(1)
       : "not recorded",
     data.aggregate_stats.avg_max_ascend_speed.toFixed(1),
-    String(data.aggregate_stats.dives_with_adverse_conditions),
+    data.aggregate_stats.dives_with_fast_ascent != null
+      ? String(data.aggregate_stats.dives_with_fast_ascent)
+      : "–",
   ];
 
   return (

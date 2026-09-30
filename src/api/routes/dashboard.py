@@ -48,8 +48,6 @@ PICK_REASONS = {
 }
 
 # Which metric to rank by for each issue (and whether higher or lower is worse)
-# The diver's star rating is not a pick category: it's subjective, and the
-# RAG keywords exclude it for the same reason.
 ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
     "rapid ascent": ("max_ascend_speed", True),  # higher is worse
     "low NDL": ("ndl_rank", False),  # lower is worse; deco entry ranks lowest
@@ -202,8 +200,7 @@ def _build_metrics(features_df) -> list[MetricRange]:
 def _compute_danger_score(row) -> float:
     """Step-weighted danger score from measured metrics only.
 
-    Unrecorded metrics contribute nothing. The diver's star rating isn't
-    scored: it's subjective (see ISSUE_RANK_KEY).
+    Unrecorded metrics contribute nothing.
     """
     score = 0.0
     # NDL: lower is worse (weight 3). A computer-flagged deco entry is the
@@ -250,9 +247,6 @@ def _identify_issues(row) -> list[str]:
         issues.append("high air consumption")
     if row.get("max_depth", 0) > 30:
         issues.append("deep dive")
-    adverse = row.get("adverse_conditions")
-    if measured(adverse) and adverse == 1:
-        issues.append("adverse conditions")
     return issues
 
 
@@ -431,7 +425,6 @@ async def get_dashboard(
     for _, row in features_df.iterrows():
         lat = row.get("latitude")
         lon = row.get("longitude")
-        adverse = row.get("adverse_conditions")
         all_dives.append(
             DiveFeature(
                 dive_number=str(row["dive_number"]),
@@ -449,12 +442,8 @@ async def get_dashboard(
                 min_ndl=_r(row["min_ndl"]),
                 entered_deco=bool(row["entered_deco"]),
                 sac_rate=_r(row["sac_rate"]),
-                rating=_r(row["rating"], 1),
                 max_ascend_speed=round(float(row["max_ascend_speed"]), 2),
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),
-                adverse_conditions=int(cast(float, adverse))
-                if measured(adverse)
-                else None,
                 dive_site_name=str(row.get("dive_site_name", "N/A")),
                 trip_name=str(row.get("trip_name", "N/A")),
                 latitude=_r(lat, 6) if measured(lat) and lat != 0 else None,
@@ -471,9 +460,7 @@ async def get_dashboard(
         avg_max_depth=round(float(features_df["max_depth"].mean()), 2),
         avg_sac_rate=_r(features_df["sac_rate"].mean()),
         avg_max_ascend_speed=round(float(features_df["max_ascend_speed"].mean()), 2),
-        dives_with_adverse_conditions=int(
-            (features_df["adverse_conditions"] == 1).sum()
-        ),
+        dives_with_fast_ascent=int((features_df["max_ascend_speed"] > 10).sum()),
         data_coverage=data_coverage(features_df),
     )
 
@@ -543,7 +530,7 @@ async def get_dashboard(
                 "dive_number": dn,
                 "site": site if site and site != "N/A" else "unknown site",
                 "pick_reason": PICK_REASONS.get(pi, "Most dangerous overall"),
-                "issues": [i for i in iss if i != "adverse conditions"],
+                "issues": iss,
                 "stats": rd,
             }
         )

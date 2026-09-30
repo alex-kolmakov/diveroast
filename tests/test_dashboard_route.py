@@ -70,7 +70,6 @@ class TestComputeDangerScore:
             "max_ascend_speed": 5,
             "sac_rate": 10,
             "max_depth": 10,
-            "adverse_conditions": 0,
         }
         assert _compute_danger_score(row) == 0.0
 
@@ -80,13 +79,10 @@ class TestComputeDangerScore:
             "max_ascend_speed": 15,
             "sac_rate": 25,
             "max_depth": 40,
-            "adverse_conditions": 1,
         }
         score = _compute_danger_score(row)
-        # NDL danger: 3*2=6, ascent danger: 2*2=4, SAC danger: 1*2=2, depth danger: 1*2=2.
-        # The diver's rating isn't scored.
+        # NDL danger: 3*2=6, ascent danger: 2*2=4, SAC danger: 1*2=2, depth danger: 1*2=2
         assert score == 14.0
-        assert _compute_danger_score({**row, "adverse_conditions": 0}) == score
 
     def test_warning_level(self):
         row = {
@@ -94,7 +90,6 @@ class TestComputeDangerScore:
             "max_ascend_speed": 9.5,
             "sac_rate": 17,
             "max_depth": 25,
-            "adverse_conditions": 0,
         }
         score = _compute_danger_score(row)
         # NDL warning: 3, ascent warning: 2, SAC warning: 1, depth warning: 1
@@ -108,7 +103,6 @@ class TestIdentifyIssues:
             "min_ndl": 20,
             "sac_rate": 10,
             "max_depth": 10,
-            "adverse_conditions": 0,
         }
         assert _identify_issues(row) == []
 
@@ -118,14 +112,14 @@ class TestIdentifyIssues:
             "min_ndl": 3,
             "sac_rate": 22,
             "max_depth": 35,
-            "adverse_conditions": 1,
         }
         issues = _identify_issues(row)
-        assert "rapid ascent" in issues
-        assert "low NDL" in issues
-        assert "high air consumption" in issues
-        assert "deep dive" in issues
-        assert "adverse conditions" in issues
+        assert issues == [
+            "rapid ascent",
+            "low NDL",
+            "high air consumption",
+            "deep dive",
+        ]
 
 
 class TestClassifyWaterType:

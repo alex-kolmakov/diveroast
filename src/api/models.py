@@ -22,7 +22,10 @@ class UploadResponse(BaseModel):
 
 
 class DiveFeature(BaseModel):
-    """Per-dive metrics. None means the dive computer didn't record it."""
+    """Per-dive metrics. None means the dive computer didn't record it.
+
+    Only fields any dive computer can produce: no diver-entered star rating.
+    """
 
     dive_number: str
     avg_depth: float
@@ -39,10 +42,8 @@ class DiveFeature(BaseModel):
     min_ndl: float | None
     entered_deco: bool = False  # default keeps pre-P1 snapshots loadable
     sac_rate: float | None
-    rating: float | None
     max_ascend_speed: float
     high_ascend_speed_count: float
-    adverse_conditions: int | None  # None when the dive isn't rated
     dive_site_name: str
     trip_name: str
     latitude: float | None
@@ -86,7 +87,7 @@ class AggregateStats(BaseModel):
     avg_max_depth: float
     avg_sac_rate: float | None
     avg_max_ascend_speed: float
-    dives_with_adverse_conditions: int  # rated below 3/5 by the diver
+    dives_with_fast_ascent: int | None = None  # None in pre-P1 snapshots
     data_coverage: dict[str, int] = {}  # dives with each metric recorded
 
 

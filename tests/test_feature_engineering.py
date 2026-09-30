@@ -107,10 +107,8 @@ def test_extract_features():
         "min_ndl",
         "entered_deco",
         "sac_rate",
-        "rating",
         "max_ascend_speed",
         "high_ascend_speed_count",
-        "adverse_conditions",
         "dive_site_name",
         "trip_name",
         "latitude",
@@ -118,13 +116,10 @@ def test_extract_features():
     }
     assert set(features.columns) == expected_columns
 
-    # Values, not just shape: this fixture has every dive rated, 9 dives
-    # flagged in_deco by the computer, and a plausible ascent-rate range.
+    # Values, not just shape: 9 dives flagged in_deco by the computer, one
+    # dive without SAC, and a plausible ascent-rate range.
     assert len(features) == 144
-    assert features["rating"].notna().all()
-    rated_low = features["rating"] < 3
-    assert (features["adverse_conditions"] == rated_low.astype(float)).all()
-    assert 0 < features["adverse_conditions"].mean() < 1
+    assert features["sac_rate"].isna().sum() == 1
     assert features["entered_deco"].sum() == 9
     assert features["max_ascend_speed"].between(0, 30).all()
 

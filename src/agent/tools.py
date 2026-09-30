@@ -61,7 +61,7 @@ TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="get_dive_summary",
-        description="Get a quick summary of a specific dive including location, max depth, duration, SAC rate, and rating. The dive data is automatically available from the uploaded dive log.",
+        description="Get a quick summary of a specific dive including location, max depth, duration, and SAC rate. The dive data is automatically available from the uploaded dive log.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -75,7 +75,7 @@ TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="list_dives",
-        description="List all dives in the uploaded dive log with site name, max depth, and rating. Use this to give the diver an overview of their log before diving into specifics.",
+        description="List all dives in the uploaded dive log with site name and max depth. Use this to give the diver an overview of their log before diving into specifics.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={},

@@ -67,17 +67,21 @@ def test_missing_pressure_yields_none_sac(sparse_df):
     assert "SAC rate" in profile.split("Not recorded for this dive:")[1]
 
 
-def test_unrated_dives_are_not_adverse(sparse_df):
-    features = extract_features(sparse_df)
-    assert math.isnan(_row(features, "23")["adverse_conditions"])
+def test_star_rating_is_ignored(sparse_df):
+    """Diver-entered star ratings are not read or reported anywhere.
 
-    # A log with no ratings at all must not report 100% adverse.
-    unrated = sparse_df.assign(rating=None)
-    unrated_features = extract_features(unrated)
-    assert unrated_features["adverse_conditions"].isna().all()
-    text = dive.analyze_all_dives(unrated)
-    assert "Rated below 3/5 by the diver: not recorded in any dive" in text
-    assert "100%" not in text.split("Rated below 3/5")[1].splitlines()[0]
+    Most dive computer exports don't have them; the app only uses signals any
+    computer produces.
+    """
+    assert "rating" not in sparse_df.columns
+    features = extract_features(sparse_df)
+    assert not {"rating", "adverse_conditions"} & set(features.columns)
+    texts = [dive.analyze_all_dives(sparse_df), dive.list_dives(sparse_df)]
+    for dn in features["dive_number"].astype(str):
+        texts.append(dive.get_dive_summary(sparse_df, dn, features))
+        texts.append(dive.analyze_dive_profile(sparse_df, dn, features))
+    for text in texts:
+        assert not re.search(r"rating|rated|adverse", text, re.IGNORECASE)
 
 
 @pytest.mark.parametrize("fixture,dive_number", [(FULL, "80"), (SPARSE, "22")])
@@ -352,7 +356,6 @@ def test_coverage_line_counts_recorded_metrics(sparse_df):
     # Only #77 and one unnumbered dive have pressure samples in the source
     # fixture; the others' SAC comes from cylinder start/end pressures.
     assert "tank pressure for 2/7" in line
-    assert "rating for 6/7" in line
     for text in (
         dive.analyze_all_dives(sparse_df),
         dive.list_dives(sparse_df),

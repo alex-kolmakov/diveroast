@@ -63,10 +63,10 @@ def test_get_dive_summary_not_found():
     assert "No data found" in result
 
 
-def test_analyze_dive_profile_adverse():
-    result = analyze_dive_profile("2")
+def test_analyze_dive_profile_ignores_star_rating():
+    result = analyze_dive_profile("2")  # dive 2 is rated 2/5 in the raw data
     assert "Dive 2" in result
-    assert "adverse conditions" in result
+    assert "adverse" not in result.lower()
 
 
 def test_analyze_dive_profile_clean():

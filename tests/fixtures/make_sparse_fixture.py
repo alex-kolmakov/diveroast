@@ -1,14 +1,13 @@
 """Generate sparse_subsurface_export.ssrf from the anonymized fixture.
 
-The anonymized fixture has every dive numbered, rated and logging NDL and
-SAC. Real logs don't: the author's 197-dive log has 32 unnumbered dives, 24
+The anonymized fixture has every dive numbered and logging NDL and SAC. Real logs don't: the author's 197-dive log has 32 unnumbered dives, 24
 unrated, 38 without tank pressure and 14 without SAC. This fixture has the
 same kinds of gaps, one per dive, so the tests exercise them:
 
     #20       complete dive (control)
     unnumbered x2, inside a trip (trip name must survive)
     #22       no sac attribute and no pressure samples
-    #23       no rating
+    #23       no rating (the app ignores ratings; kept as a varied input)
     #24       no ndl samples
     #<deco>   a dive where the computer flagged in_deco='1'
 

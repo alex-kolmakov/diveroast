@@ -47,10 +47,7 @@ def _dive_line(row) -> str:
         if measured(grad) and grad > 1:
             temp_str += f" (gradient {grad:.1f}°C)"
         parts.append(temp_str)
-    line = f"  #{row['dive_number']} {location}: " + ", ".join(parts)
-    if measured(row.get("adverse_conditions")) and row["adverse_conditions"] == 1:
-        line += " [rated <3/5]"
-    return line
+    return f"  #{row['dive_number']} {location}: " + ", ".join(parts)
 
 
 class DiverRoastAgent:
@@ -115,7 +112,6 @@ class DiverRoastAgent:
 
         sac = features_df["sac_rate"]
         ndl = features_df["min_ndl"]
-        rated_low = int((features_df["adverse_conditions"] == 1).sum())
         agg = (
             f"Aggregates ({n} dives): "
             f"avg max depth {features_df['max_depth'].mean():.1f}m, "
@@ -125,8 +121,7 @@ class DiverRoastAgent:
             f"avg max ascent {features_df['max_ascend_speed'].mean():.1f} m/min, "
             f"fastest ascent {features_df['max_ascend_speed'].max():.1f} m/min, "
             f"lowest NDL {fmt(ndl.min(), '.0f', ' min')}, "
-            f"{int(features_df['entered_deco'].sum())} dives entered deco, "
-            f"{rated_low} dives rated below 3/5 by the diver | "
+            f"{int(features_df['entered_deco'].sum())} dives entered deco | "
             f"temperature exposure: {temp_exposure_str}, "
             f"avg thermocline gradient {fmt(features_df['temp_gradient'].mean(), unit='°C')}"
         )

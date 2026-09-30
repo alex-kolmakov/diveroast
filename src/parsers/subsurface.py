@@ -18,7 +18,9 @@ def extract_all_dive_profiles_refined(root):
     """Extract dive profiles for all dives from a Subsurface XML root element.
 
     Returns a DataFrame with per-sample rows containing dive_number, trip_name,
-    dive_site_name, time, depth, temperature, pressure, rbt, ndl, sac_rate, rating.
+    dive_site_name, time, depth, temperature, pressure, rbt, ndl, in_deco,
+    sac_rate. Attributes the log does not record stay None. The diver's star
+    rating is deliberately not read: most dive computer exports don't have one.
     """
     dive_data = []
 
@@ -65,7 +67,6 @@ def extract_all_dive_profiles_refined(root):
         longitude = site_info["longitude"]
 
         sac_rate = dive.attrib.get("sac", "N/A").replace(" l/min", "")
-        rating = dive.attrib.get("rating", "N/A")
         for sample in dive.findall(".//sample"):
             time = sample.attrib.get("time", "N/A").replace(" min", "")
             depth = sample.attrib.get("depth", "N/A").replace(" m", "")
@@ -107,7 +108,6 @@ def extract_all_dive_profiles_refined(root):
                     "ndl": float(ndl) if ndl else None,
                     "in_deco": int(in_deco) if in_deco is not None else None,
                     "sac_rate": float(sac_rate) if sac_rate != "N/A" else None,
-                    "rating": int(rating) if rating and rating != "N/A" else None,
                     "latitude": latitude,
                     "longitude": longitude,
                 }
