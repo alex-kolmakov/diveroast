@@ -100,9 +100,10 @@ class TestGetActivePrompt:
 
     def test_local_prompt_versions_exist(self):
         """Verify local prompt versions are still available as fallback."""
-        assert 1 in PROMPT_VERSIONS
+        assert 1 not in PROMPT_VERSIONS  # PROMPT_V1 retired
         assert 2 in PROMPT_VERSIONS
         assert 3 in PROMPT_VERSIONS
+        assert 4 in PROMPT_VERSIONS
         for pv in PROMPT_VERSIONS.values():
             assert pv.prompt
             assert pv.label
