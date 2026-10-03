@@ -266,6 +266,9 @@ def test_full_rebuild_row_floor():
         check_row_floor(322, previous_count=17_107)  # the production symptom
     with pytest.raises(RowFloorError):
         check_row_floor(500, previous_count=None)  # below RAG_MIN_ROWS
+    with pytest.raises(RowFloorError):
+        # A partial rebuild on top of an already-partial table (seen locally).
+        check_row_floor(2_049, previous_count=322)
     check_row_floor(17_000, previous_count=17_107)
     check_row_floor(settings.RAG_MIN_ROWS, previous_count=None)
 

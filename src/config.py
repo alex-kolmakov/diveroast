@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     # the local index: on-topic best hits score -4..+2, off-topic ~-11.
     RAG_MIN_RELEVANCE: float = -5.0
     # Full rebuild fails if it yields fewer rows than this, or less than
-    # RAG_REBUILD_MIN_RATIO of the previous table.
-    RAG_MIN_ROWS: int = 1000
+    # RAG_REBUILD_MIN_RATIO of the previous table. A complete DAN index is
+    # about 17,800 rows; a rebuild that kept a stale cursor produced 2,049.
+    RAG_MIN_ROWS: int = 10_000
     RAG_REBUILD_MIN_RATIO: float = 0.8
 
     # Prompt
