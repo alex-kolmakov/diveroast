@@ -6,6 +6,12 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.1-flash-lite-preview"
 
+    # Local OpenAI-compatible server (LM Studio, Ollama). When LLM_BASE_URL is
+    # set it replaces Gemini, e.g. http://localhost:1234/v1
+    LLM_BASE_URL: str = ""
+    LLM_MODEL: str = ""
+    LLM_API_KEY: str = "lm-studio"
+
     # LanceDB / Embeddings
     LANCEDB_URI: str = ".lancedb"
     LANCEDB_TABLE_NAME: str = "dan_articles___texts"
