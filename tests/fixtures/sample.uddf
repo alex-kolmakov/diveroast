@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-written for DiveRoast tests (UDDF 3.2, SI units). Not real dives. -->
+<uddf xmlns="http://www.streit.cc/uddf/3.2/" version="3.2.0">
+  <generator>
+    <name>DiveRoast test fixture</name>
+  </generator>
+  <divesite>
+    <site id="site_reef">
+      <name>Test Reef</name>
+      <geography>
+        <latitude>27.2579</latitude>
+        <longitude>33.8116</longitude>
+      </geography>
+    </site>
+  </divesite>
+  <profiledata>
+    <repetitiongroup id="rg1">
+      <!-- Numbered deco dive: tank pressure (Pa), temperature (K), NDL (s). -->
+      <dive id="dive_deep">
+        <informationbeforedive>
+          <link ref="site_reef"/>
+          <divenumber>101</divenumber>
+          <datetime>2026-05-01T09:00:00</datetime>
+        </informationbeforedive>
+        <samples>
+          <waypoint><divetime>0</divetime><depth>0.5</depth><temperature>299.15</temperature><tankpressure ref="tank_main">20000000</tankpressure><tankpressure ref="tank_stage">18000000</tankpressure><nodecotime>5940</nodecotime></waypoint>
+          <waypoint><divetime>120</divetime><depth>30.0</depth><temperature>297.15</temperature><tankpressure ref="tank_main">18500000</tankpressure><nodecotime>480</nodecotime></waypoint>
+          <waypoint><divetime>900</divetime><depth>30.0</depth><temperature>296.15</temperature><tankpressure ref="tank_main">13000000</tankpressure><nodecotime>0</nodecotime><decostop kind="mandatory" decodepth="3" duration="120"/></waypoint>
+          <waypoint><divetime>1200</divetime><depth>6.0</depth><temperature>298.15</temperature><tankpressure ref="tank_main">10000000</tankpressure><decostop kind="mandatory" decodepth="3" duration="60"/></waypoint>
+          <waypoint><divetime>1500</divetime><depth>3.0</depth><temperature>299.15</temperature><tankpressure ref="tank_main">9000000</tankpressure></waypoint>
+          <waypoint><divetime>1560</divetime><depth>0.3</depth><temperature>299.15</temperature><tankpressure ref="tank_main">8800000</tankpressure></waypoint>
+        </samples>
+      </dive>
+      <!-- Unnumbered shallow dive with a safety stop: not deco. -->
+      <dive id="dive_shallow">
+        <informationbeforedive>
+          <link ref="site_reef"/>
+          <datetime>2026-05-01T13:30:00</datetime>
+        </informationbeforedive>
+        <samples>
+          <waypoint><divetime>0</divetime><depth>0.4</depth></waypoint>
+          <waypoint><divetime>60</divetime><depth>12.0</depth><decostop kind="safety" decodepth="5" duration="180"/></waypoint>
+          <waypoint><divetime>1800</divetime><depth>12.0</depth></waypoint>
+          <waypoint><divetime>2000</divetime><depth>5.0</depth><decostop kind="safety" decodepth="5" duration="180"/></waypoint>
+          <waypoint><divetime>2180</divetime><depth>5.0</depth></waypoint>
+          <waypoint><divetime>2240</divetime><depth>0.2</depth></waypoint>
+        </samples>
+      </dive>
+    </repetitiongroup>
+  </profiledata>
+  <divetrip>
+    <trip id="trip_redsea">
+      <name>Red Sea test week</name>
+      <trippart>
+        <relateddives>
+          <link ref="dive_deep"/>
+          <link ref="dive_shallow"/>
+        </relateddives>
+      </trippart>
+    </trip>
+  </divetrip>
+</uddf>

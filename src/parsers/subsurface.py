@@ -119,6 +119,11 @@ class SubsurfaceParser(DiveLogParser):
     def parse(self, file_path: str) -> pd.DataFrame:
         tree = ET.parse(file_path)
         root = tree.getroot()
+        # UDDF exports are often saved as .xml too.
+        from src.parsers.uddf import is_uddf, parse_uddf_root
+
+        if is_uddf(root):
+            return parse_uddf_root(root)
         return extract_all_dive_profiles_refined(root)
 
     def supported_extensions(self) -> list[str]:

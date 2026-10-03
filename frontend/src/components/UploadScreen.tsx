@@ -76,7 +76,7 @@ export function UploadScreen({ onUploadComplete }: Props) {
         <input
           id="file-input"
           type="file"
-          accept=".ssrf,.xml"
+          accept=".ssrf,.xml,.uddf,.fit,.zip"
           onChange={handleChange}
           className="hidden"
         />
@@ -88,7 +88,7 @@ export function UploadScreen({ onUploadComplete }: Props) {
         <p className="text-center text-muted-foreground">
           {isUploading
             ? "Parsing dive log..."
-            : "Drop your .ssrf or .xml dive log here, or click to browse"}
+            : "Drop a dive log here (Subsurface .ssrf, UDDF, a Garmin .fit dive, or a .zip of them), or click to browse"}
         </p>
       </div>
 

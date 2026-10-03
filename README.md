@@ -34,6 +34,7 @@ It analyzes your SCUBA dive logs, identifies safety issues, and delivers persona
 
 - **Agentic analysis** — Gemini with function-calling tools reviews your dives and delivers personalized safety commentary with dry humor
 - **RAG over DAN content** — hybrid search (semantic + full-text) over DAN incident reports and guidelines via LanceDB
+- **Dive log formats** — Subsurface (`.ssrf`/`.xml`), UDDF (`.uddf`, the exchange format of most dive software), Garmin Descent `.fit` dives, or a `.zip` of any of these (e.g. a Garmin Connect export)
 - **Interactive dashboard** — per-dive gauges for ascent rate, SAC rate, NDL, depth; top 3 worst dives with LLM-generated explanations; diver profile with water types, regions, experience level; mini maps for dive sites
 - **MCP server** — all diving tools exposed via the Model Context Protocol for use in Claude Desktop, Cursor, or any MCP client
 - **Observability** — full LLM/tool/RAG tracing with Arize Phoenix
@@ -110,7 +111,7 @@ src/
 ├── api/           # FastAPI gateway with SSE streaming
 ├── mcp/           # MCP server (8 tools via FastMCP)
 ├── tools/         # Tool implementations shared by the agent and MCP server
-├── parsers/       # Dive log parsing (ABC + Subsurface XML)
+├── parsers/       # Dive log parsing: Subsurface, UDDF, Garmin FIT, .zip of logs
 ├── pipelines/     # CLI scripts for DAN ingestion & dive processing
 ├── rag/           # dlt pipeline + LanceDB hybrid search
 ├── config.py
