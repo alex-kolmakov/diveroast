@@ -46,6 +46,9 @@ async def upload_dive_log(
     finally:
         os.unlink(tmp_path)
 
+    if df.empty or "dive_number" not in df.columns:
+        raise HTTPException(status_code=400, detail=f"No dives found in {filename}")
+
     if donate:
         donations_dir = Path(settings.DONATIONS_DIR)
         donations_dir.mkdir(parents=True, exist_ok=True)

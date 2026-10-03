@@ -31,6 +31,19 @@ async def test_upload_unsupported_file():
 
 
 @pytest.mark.anyio
+async def test_upload_without_dives_is_rejected():
+    """A well-formed log with no dives is a client error, not a crash."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/upload",
+            files={"file": ("empty.xml", b"<divelog></divelog>", "text/xml")},
+        )
+    assert response.status_code == 400
+    assert "No dives found" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_upload_valid_file():
     transport = ASGITransport(app=app)
 
