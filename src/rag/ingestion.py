@@ -17,6 +17,9 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+PIPELINE_NAME = "dan_articles"
+
+
 class RowFloorError(RuntimeError):
     """A full rebuild produced too few rows to trust."""
 
@@ -137,7 +140,7 @@ def wordpress_rest_api_source():
                 _make_resource("dan_diving_incidents", "dan_diving_incidents"),
                 _make_resource("dan_diseases_conds", "dan_diseases_conds"),
             ],
-        }
+        },
     )
 
 
@@ -191,9 +194,9 @@ def run_pipeline(full_replace: bool = False):
     logger.info("Base URL: %s", settings.DAN_BASE_URL)
 
     pipeline = dlt.pipeline(
-        pipeline_name="dan_articles",
+        pipeline_name=PIPELINE_NAME,
         destination="lancedb",
-        dataset_name="dan_articles",
+        dataset_name=PIPELINE_NAME,
     )
 
     data = wordpress_rest_api_source() | dan_articles
@@ -204,22 +207,24 @@ def run_pipeline(full_replace: bool = False):
         previous_count = db.open_table(settings.LANCEDB_TABLE_NAME).count_rows()
 
     if full_replace:
-        # Drop the table explicitly before running so Lance doesn't attempt
-        # schema evolution (adding chunk_id to an existing nullable-free table
-        # raises "All-null columns must be nullable").
-        with contextlib.suppress(Exception):
-            db.drop_table(settings.LANCEDB_TABLE_NAME)
-        logger.info(
-            "Dropped existing table '%s' for full rebuild.", settings.LANCEDB_TABLE_NAME
-        )
+        # Start from nothing: drop the texts table, dlt's own tables in the
+        # dataset (it restores state from them) and the local pipeline state.
+        # The incremental cursors live under the "rest_api" source, which
+        # refresh="drop_sources" doesn't reach when the run loads the
+        # dan_articles transformer, so a cursor left behind made the "full"
+        # rebuild fetch only articles modified since the last run.
+        for name in list(db.table_names()):
+            if name.startswith(f"{PIPELINE_NAME}___"):
+                with contextlib.suppress(Exception):
+                    db.drop_table(name)
+        pipeline = pipeline.drop()
+        logger.info("Dropped the '%s' dataset and dlt state.", PIPELINE_NAME)
 
     write_disposition = "replace" if full_replace else "merge"
     # merge: chunk_id (url + positional index) is the primary key.
     # Incremental source fetches only articles modified since the last run;
     # their chunks are upserted in-place. First run fetches everything.
-    # replace: full rebuild. refresh="drop_sources" also resets dlt's
-    # incremental cursor; without it the "full" rebuild only refetches
-    # articles modified since the last run.
+    # replace: full rebuild, on the clean slate made above.
     run_kwargs: dict[str, Any] = {"refresh": "drop_sources"} if full_replace else {}
     info = pipeline.run(
         lancedb_adapter(data, embed="value"),

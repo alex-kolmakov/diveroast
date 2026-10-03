@@ -274,9 +274,11 @@ def test_full_rebuild_resets_dlt_state():
     table = MagicMock()
     table.count_rows.return_value = 20_000
     db = MagicMock()
-    db.table_names.return_value = [settings.LANCEDB_TABLE_NAME]
+    state_table = "dan_articles____dlt_pipeline_state"
+    db.table_names.return_value = [settings.LANCEDB_TABLE_NAME, state_table]
     db.open_table.return_value = table
     pipeline = MagicMock()
+    pipeline.drop.return_value = pipeline
     with (
         patch.object(ingestion.lancedb, "connect", return_value=db),
         patch.object(ingestion.dlt, "pipeline", return_value=pipeline),
@@ -285,8 +287,14 @@ def test_full_rebuild_resets_dlt_state():
     ):
         ingestion.run_pipeline(full_replace=True)
         assert pipeline.run.call_args.kwargs["refresh"] == "drop_sources"
+        # The cursors survive unless dlt's state is wiped locally and in the dataset.
+        pipeline.drop.assert_called_once()
+        dropped = {call.args[0] for call in db.drop_table.call_args_list}
+        assert dropped == {settings.LANCEDB_TABLE_NAME, state_table}
+
         ingestion.run_pipeline(full_replace=False)
         assert pipeline.run.call_args.kwargs.get("refresh") is None
+        pipeline.drop.assert_called_once()  # incremental runs keep their state
 
 
 # --- Step 5: the unnumbered-dive fix ---------------------------------------
