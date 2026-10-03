@@ -6,15 +6,24 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.agent.conversation import DiverRoastAgent
 from src.api.dependencies import get_session, get_snapshot_store
-from src.api.models import ChatRequest
+from src.api.models import ChatRequest, Source
 from src.storage.snapshots import SnapshotStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _mark_cited(sources: list[dict[str, str]], text: str) -> list[dict]:
+    """Flag the retrieved articles the answer actually links to.
+
+    Retrieval returns whatever scored highest; only a link in the text shows
+    the answer used it.
+    """
+    return [{**s, "cited": s["url"].rstrip("/") in text} for s in sources]
+
+
 async def _record_roast(
-    agent: DiverRoastAgent, text: str, store: SnapshotStore
+    agent: DiverRoastAgent, text: str, sources: list[dict], store: SnapshotStore
 ) -> None:
     """Keep the first answer after an upload as the log's roast.
 
@@ -25,9 +34,14 @@ async def _record_roast(
         return
     agent.roast_summary = text
     agent.roast_prompt = agent.last_prompt
+    agent.roast_sources = sources
     if agent.dashboard is not None:
         agent.dashboard = agent.dashboard.model_copy(
-            update={"roast_summary": text, "roast_prompt": agent.roast_prompt}
+            update={
+                "roast_summary": text,
+                "roast_prompt": agent.roast_prompt,
+                "roast_sources": [Source(**s) for s in sources],
+            }
         )
         await store.save(
             agent.share_id, agent.dashboard.model_copy(update={"session_id": None})
@@ -56,12 +70,11 @@ async def chat(
             async for chunk in agent.chat_stream(request.message):
                 parts.append(chunk)
                 yield {"event": "message", "data": json.dumps({"content": chunk})}
-            if agent.last_sources:
-                yield {
-                    "event": "sources",
-                    "data": json.dumps({"sources": agent.last_sources}),
-                }
-            await _record_roast(agent, "".join(parts), store)
+            text = "".join(parts)
+            sources = _mark_cited(agent.last_sources, text)
+            if sources:
+                yield {"event": "sources", "data": json.dumps({"sources": sources})}
+            await _record_roast(agent, text, sources, store)
             yield {"event": "done", "data": json.dumps({"status": "complete"})}
         except Exception as e:
             logger.exception("Chat turn failed")

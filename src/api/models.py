@@ -130,6 +130,14 @@ class SingleDive(BaseModel):
     issues: list[str]  # the same issue sentences the agent sees
 
 
+class Source(BaseModel):
+    """A DAN article retrieved for an answer; ``cited`` if the answer links it."""
+
+    title: str
+    url: str
+    cited: bool = False
+
+
 class DashboardResponse(BaseModel):
     # Private session ID: present for the owner, stripped from shared snapshots.
     session_id: str | None = None
@@ -142,6 +150,7 @@ class DashboardResponse(BaseModel):
     diver_profile: DiverProfile
     roast_summary: str | None = None
     roast_prompt: str | None = None  # which system prompt wrote the roast
+    roast_sources: list[Source] = []  # DAN articles retrieved for the roast
     # "single": one dive (e.g. a Garmin FIT file) -> dive detail, not a log
     # overview. Defaults keep pre-P1 snapshots loadable.
     mode: str = "log"

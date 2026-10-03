@@ -636,6 +636,7 @@ async def get_dashboard(
         diver_profile=diver_profile,
         roast_summary=agent.roast_summary,
         roast_prompt=agent.roast_prompt,
+        roast_sources=agent.roast_sources,
         mode="single" if single else "log",
         single_dive=_build_single_dive(agent.dive_data, features_df.iloc[0])
         if single

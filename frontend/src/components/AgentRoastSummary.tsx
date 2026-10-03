@@ -1,24 +1,27 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { MessageSquare } from "lucide-react";
-import Markdown from "react-markdown";
-import type { ChatMessage } from "@/types";
+import { Flame } from "lucide-react";
+import { AnswerMarkdown } from "@/components/AnswerMarkdown";
+import { SourceList } from "@/components/SourceList";
+import type { ChatMessage, Source } from "@/types";
 
 interface Props {
   messages?: ChatMessage[];
   isLoading?: boolean;
   staticText?: string | null;
+  staticSources?: Source[] | null;
 }
 
-export function AgentRoastSummary({ messages = [], isLoading = false, staticText }: Props) {
+export function AgentRoastSummary({ messages = [], isLoading = false, staticText, staticSources }: Props) {
   const firstAssistantMsg = messages.find((m) => m.role === "assistant");
   const content = staticText ?? firstAssistantMsg?.content;
+  const sources = staticText != null ? staticSources : firstAssistantMsg?.sources;
 
   return (
-    <Card>
+    <Card className="border-primary/30">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <MessageSquare className="h-4 w-4" />
-          Agent Roast
+          <Flame className="h-4 w-4 text-primary" aria-hidden />
+          The Roast
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -28,8 +31,9 @@ export function AgentRoastSummary({ messages = [], isLoading = false, staticText
             <span className="text-sm">Generating roast...</span>
           </div>
         ) : content ? (
-          <div className="prose prose-sm prose-invert max-w-none leading-relaxed">
-            <Markdown>{content}</Markdown>
+          <div className="prose prose-sm prose-invert max-w-none leading-relaxed [&>*:first-child]:mt-0">
+            <AnswerMarkdown content={content} sources={sources} />
+            <SourceList sources={sources} />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">

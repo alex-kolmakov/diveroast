@@ -1,6 +1,7 @@
 export interface Source {
   title: string;
   url: string;
+  cited?: boolean; // the answer links to it (absent in older snapshots)
 }
 
 export interface ChatMessage {
@@ -132,6 +133,7 @@ export interface DashboardData {
   diver_profile: DiverProfile;
   roast_summary?: string | null;
   roast_prompt?: string | null;
+  roast_sources?: Source[]; // absent in older shared snapshots
   mode?: "single" | "log"; // absent in older shared snapshots = "log"
   single_dive?: SingleDive | null;
 }

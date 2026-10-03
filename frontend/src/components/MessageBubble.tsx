@@ -1,4 +1,5 @@
-import Markdown from "react-markdown";
+import { AnswerMarkdown } from "@/components/AnswerMarkdown";
+import { SourceList } from "@/components/SourceList";
 import type { ChatMessage } from "@/types";
 
 interface Props {
@@ -21,26 +22,8 @@ export function MessageBubble({ message }: Props) {
           <span className="whitespace-pre-wrap">{message.content || "..."}</span>
         ) : (
           <div className="prose prose-sm prose-invert max-w-none">
-            <Markdown>{message.content || "..."}</Markdown>
-            {message.sources && message.sources.length > 0 && (
-              <div className="mt-2 border-t border-foreground/10 pt-2 text-xs not-prose">
-                <span className="text-muted-foreground">DAN sources:</span>
-                <ul className="mt-1 space-y-0.5">
-                  {message.sources.map((s) => (
-                    <li key={s.url}>
-                      <a
-                        href={s.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline underline-offset-2 hover:text-primary"
-                      >
-                        {s.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <AnswerMarkdown content={message.content || "..."} sources={message.sources} />
+            <SourceList sources={message.sources} />
           </div>
         )}
       </div>

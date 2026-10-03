@@ -209,6 +209,9 @@ async def test_roast_is_saved_server_side(api):
         shared = (await client.get(f"/api/shared/{share_id}")).json()
         assert shared["roast_summary"] == "Your ascents need work."
         assert shared["roast_prompt"] == "sharp-ironic-analyst (v4)"
+        assert shared["roast_sources"] == [
+            {"title": "Ascent", "url": "https://dan.org/a", "cited": False}
+        ]
 
 
 async def test_pre_p1_snapshot_still_renders(api, tmp_path):
@@ -475,3 +478,15 @@ def test_upload_parser_rejects_entity_expansion(tmp_path):
     )
     with pytest.raises(Exception, match="(?i)entit"):
         get_parser(str(bomb)).parse(str(bomb))
+
+
+def test_only_linked_sources_count_as_cited():
+    """A retrieved article is cited only if the answer links to it."""
+    from src.api.routes.chat import _mark_cited
+
+    sources = [
+        {"title": "Ascent", "url": "https://dan.org/ascent/"},
+        {"title": "Avelo", "url": "https://dan.org/avelo/"},
+    ]
+    text = "Bolting is how you get bent ([DAN: Ascent](https://dan.org/ascent))."
+    assert [s["cited"] for s in _mark_cited(sources, text)] == [True, False]

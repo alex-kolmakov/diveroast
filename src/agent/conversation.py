@@ -64,6 +64,7 @@ class DiverRoastAgent:
         self.dashboard = None  # cached DashboardResponse for the current log
         self.roast_summary: str | None = None
         self.roast_prompt: str | None = None
+        self.roast_sources: list[dict] = []
         self.last_prompt: str | None = None
         self.last_sources: list[dict[str, str]] = []
 
@@ -88,6 +89,7 @@ class DiverRoastAgent:
         self.dashboard = None
         self.roast_summary = None
         self.roast_prompt = None
+        self.roast_sources = []
         dive_numbers = df["dive_number"].unique().tolist()
 
         features_df = extract_features(df)
