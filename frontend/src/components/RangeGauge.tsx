@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { METRICS, NOT_RECORDED, ZONE_TEXT, metricKind } from "@/lib/metrics";
 import type { DiveMetricPoint, MetricRange } from "@/types";
 
 interface Props {
@@ -11,21 +12,25 @@ const ZONE_COLORS = {
   danger: "bg-danger",
 };
 
-const ZONE_TEXT = {
-  safe: "text-safe",
-  warning: "text-warning",
-  danger: "text-danger",
-};
+const COLD_COLOR = "#3b82f6";
+const TEMPERATE_COLOR = "#22c55e";
+const TROPICAL_COLOR = "#ef4444";
 
 const fmt = (v: number | null) => (v == null ? "–" : v.toFixed(1));
 
+/** One name per metric; unknown labels (older snapshots) are shown as sent. */
+function displayName(metric: MetricRange): string {
+  const kind = metricKind(metric.label);
+  return kind ? METRICS[kind].name : metric.label;
+}
+
 /** Metric the computer didn't log for any dive: say so instead of drawing a gauge. */
-function NotRecorded({ metric }: Props) {
+function NotRecorded({ name }: { name: string }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{metric.label}</span>
-        <span className="text-sm text-muted-foreground">not recorded</span>
+        <span className="text-sm font-medium">{name}</span>
+        <span className="text-sm text-muted-foreground">{NOT_RECORDED}</span>
       </div>
       <div className="h-5 w-full rounded-full border border-dashed border-muted" />
     </div>
@@ -33,151 +38,211 @@ function NotRecorded({ metric }: Props) {
 }
 
 /** "recorded for 141/197 dives" when some dives lack this metric. */
-function Coverage({ metric }: Props) {
+function coverage(metric: MetricRange): string | null {
   if (!metric.total || metric.recorded >= metric.total) return null;
-  return (
-    <span className="text-xs text-muted-foreground">
-      recorded for {metric.recorded}/{metric.total} dives
-    </span>
-  );
+  return `recorded for ${metric.recorded}/${metric.total} dives`;
 }
 
-function TemperatureGauge({ metric }: Props) {
-  const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
-  const dives = metric.per_dive;
-  if (dives.length === 0) return <NotRecorded metric={metric} />;
-
-  const totalDives = dives.length;
-  const segmentWidth = 100 / totalDives;
-
+/** One equal-width segment per dive, highlighted on hover. */
+function DiveBar({
+  dives,
+  hovered,
+  onHover,
+  color,
+  children,
+}: {
+  dives: DiveMetricPoint[];
+  hovered: DiveMetricPoint | null;
+  onHover: (dive: DiveMetricPoint | null) => void;
+  color: (dive: DiveMetricPoint) => { className?: string; background?: string };
+  children?: React.ReactNode;
+}) {
+  const segmentWidth = 100 / dives.length;
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{metric.label}</span>
-        <span className="text-sm font-semibold text-muted-foreground">
-          {fmt(metric.min_val)}° – {fmt(metric.max_val)}°
-        </span>
-      </div>
-      <Coverage metric={metric} />
-
-      {/* Same equal-width segment bar as other metrics, colored by temperature band */}
-      <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
-        {dives.map((dive, i) => (
+    <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
+      {dives.map((dive, i) => {
+        const { className = "", background } = color(dive);
+        return (
           <div
             key={dive.dive_number}
-            className={`absolute inset-y-0 transition-opacity ${
-              hoveredDive && hoveredDive.dive_number !== dive.dive_number
+            className={`absolute inset-y-0 transition-opacity ${className} ${
+              hovered && hovered.dive_number !== dive.dive_number
                 ? "opacity-40"
                 : "opacity-80 hover:opacity-100"
             }`}
             style={{
               left: `${i * segmentWidth}%`,
               width: `${segmentWidth}%`,
-              background: _tempColor(dive.value),
-              borderRight: i < totalDives - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
+              background,
+              borderRight: i < dives.length - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
             }}
-            onMouseEnter={() => setHoveredDive(dive)}
-            onMouseLeave={() => setHoveredDive(null)}
+            onMouseEnter={() => onHover(dive)}
+            onMouseLeave={() => onHover(null)}
           />
-        ))}
+        );
+      })}
+      {children}
+    </div>
+  );
+}
+
+function tempColor(temp: number): string {
+  if (temp < 15) return COLD_COLOR;
+  if (temp <= 24) return TEMPERATE_COLOR;
+  return TROPICAL_COLOR;
+}
+
+function tempNickname(cold: number, temperate: number, tropical: number): { title: string; color: string } {
+  const total = cold + temperate + tropical || 1;
+  const cPct = cold / total;
+  const tPct = temperate / total;
+  const trPct = tropical / total;
+  const color = trPct >= 0.65 ? TROPICAL_COLOR : cPct >= 0.65 ? COLD_COLOR : TEMPERATE_COLOR;
+
+  let title = "All-Around Diver";
+  if (trPct >= 0.85) title = "Coral Chaser";
+  else if (trPct >= 0.65) title = "Warmwater Regular";
+  else if (cPct >= 0.85) title = "Ice Diver";
+  else if (cPct >= 0.65) title = "Cold Water Devotee";
+  else if (tPct >= 0.65) title = "Temperate Explorer";
+  else if (cPct >= 0.4 && trPct <= 0.2) title = "Cold Water Diver";
+  else if (trPct >= 0.4 && cPct <= 0.2) title = "Sun Seeker";
+  else if (Math.abs(cPct - trPct) < 0.15 && tPct < 0.3) title = "Extreme Contrarian";
+  return { title, color };
+}
+
+/** Temperature range, per-dive bar and exposure by band, in one gauge. */
+export function TemperatureGauge({
+  metric,
+  exposure,
+}: Props & { exposure?: Record<string, number> }) {
+  const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
+  const dives = metric.per_dive;
+  if (dives.length === 0) return <NotRecorded name={METRICS.temp.name} />;
+
+  const bands = [
+    { label: "Cold (<15°C)", count: exposure?.["Cold (<15°C)"] ?? 0, color: COLD_COLOR },
+    { label: "Temperate (15–24°C)", count: exposure?.["Temperate (15-24°C)"] ?? 0, color: TEMPERATE_COLOR },
+    { label: "Tropical (>24°C)", count: exposure?.["Tropical (>24°C)"] ?? 0, color: TROPICAL_COLOR },
+  ];
+  const total = bands.reduce((sum, b) => sum + b.count, 0);
+  const nickname = total > 0 ? tempNickname(bands[0].count, bands[1].count, bands[2].count) : null;
+  const meta = [`avg ${fmt(metric.avg_val)} ${metric.unit}`, coverage(metric)].filter(Boolean).join(" · ");
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{METRICS.temp.name}</span>
+        <span className="text-sm font-semibold text-muted-foreground">
+          {fmt(metric.min_val)}° – {fmt(metric.max_val)}°
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{meta}</span>
+        {nickname && (
+          <span className="font-semibold" style={{ color: nickname.color }}>
+            {nickname.title}
+          </span>
+        )}
       </div>
 
-      {/* Zone labels + hover tooltip */}
-      <div className="flex justify-between text-xs text-muted-foreground">
+      <DiveBar
+        dives={dives}
+        hovered={hoveredDive}
+        onHover={setHoveredDive}
+        color={(dive) => ({ background: tempColor(dive.value) })}
+      />
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {hoveredDive ? (
-          <span style={{ color: _tempColor(hoveredDive.value) }}>
+          <span style={{ color: tempColor(hoveredDive.value) }}>
             Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(1)} {metric.unit}
           </span>
         ) : (
-          <>
-            <span className="text-blue-400">Cold &lt;15°</span>
-            <span className="text-green-400">Temperate</span>
-            <span className="text-red-400">Tropical &gt;24°</span>
-          </>
+          bands
+            .filter((b) => total === 0 || b.count > 0)
+            .map((b) => (
+              <span key={b.label}>
+                {total > 0 && (
+                  <span className="font-semibold" style={{ color: b.color }}>
+                    {b.count}{" "}
+                  </span>
+                )}
+                <span style={total > 0 ? undefined : { color: b.color }}>{b.label}</span>
+                {total > 0 && ` · ${((b.count / total) * 100).toFixed(0)}%`}
+              </span>
+            ))
         )}
       </div>
     </div>
   );
 }
 
-/** Pick display colour matching the absolute-scale band zones. */
-function _tempColor(temp: number): string {
-  if (temp < 15) return "#3b82f6";
-  if (temp < 24) return "#22c55e";
-  return "#ef4444";
-}
-
 export function RangeGauge({ metric }: Props) {
   const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
-
-  if (metric.label === "Avg Temperature") {
-    return <TemperatureGauge metric={metric} />;
-  }
-
+  const name = displayName(metric);
   const dives = metric.per_dive;
-  const totalDives = dives.length;
-  if (totalDives === 0) return <NotRecorded metric={metric} />;
+  if (dives.length === 0) return <NotRecorded name={name} />;
 
-  // Each dive gets an equal-width segment of the bar
-  const segmentWidth = 100 / totalDives;
+  // NDL is inverted: lower is worse, so its thresholds run high to low.
+  const inverted = metric.warning_upper < metric.safe_upper;
+  const hasThresholds = metric.safe_upper > 0 && metric.warning_upper > 0;
+  const overLimit = dives.filter((d) => d.zone === "danger").length;
+  const kind = metricKind(metric.label);
+  const meta = `avg ${fmt(metric.avg_val)} · range ${fmt(metric.min_val)}–${fmt(metric.max_val)}`;
+  // What the number means and where the limits sit, under the bar.
+  const legend = [
+    kind && METRICS[kind].qualifier,
+    hasThresholds &&
+      (inverted
+        ? `safe ≥ ${metric.safe_upper} · danger < ${metric.warning_upper} ${metric.unit}`
+        : `safe ≤ ${metric.safe_upper} · limit ${metric.warning_upper} ${metric.unit}`),
+    coverage(metric),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{metric.label}</span>
-        <span className={`text-sm font-semibold ${ZONE_TEXT[metric.zone]}`}>
-          {metric.worst_val != null
-            ? `${metric.worst_val.toFixed(1)} ${metric.unit}`
-            : `${fmt(metric.min_val)}° – ${fmt(metric.max_val)}°`}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{name}</span>
+        <span className={`shrink-0 text-sm font-semibold ${ZONE_TEXT[metric.zone]}`}>
+          {metric.worst_val != null ? `worst ${metric.worst_val.toFixed(1)} ${metric.unit}` : "–"}
         </span>
       </div>
-      <Coverage metric={metric} />
-
-      {/* Gauge bar — each dive is a segment */}
-      <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
-        {dives.map((dive, i) => (
-          <div
-            key={dive.dive_number}
-            className={`absolute inset-y-0 transition-opacity ${ZONE_COLORS[dive.zone]} ${
-              hoveredDive && hoveredDive.dive_number !== dive.dive_number
-                ? "opacity-40"
-                : "opacity-80 hover:opacity-100"
-            }`}
-            style={{
-              left: `${i * segmentWidth}%`,
-              width: `${segmentWidth}%`,
-              borderRight: i < totalDives - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
-            }}
-            onMouseEnter={() => setHoveredDive(dive)}
-            onMouseLeave={() => setHoveredDive(null)}
-          />
-        ))}
-
-        {/* Threshold markers */}
-        {metric.safe_upper > 0 && (
-          <div
-            className="absolute inset-y-0 w-px bg-foreground/30"
-            style={{ left: `${_thresholdPercent(metric.safe_upper, metric)}%` }}
-          />
-        )}
-        {metric.warning_upper > 0 && metric.warning_upper !== metric.safe_upper && (
-          <div
-            className="absolute inset-y-0 w-px bg-foreground/30"
-            style={{ left: `${_thresholdPercent(metric.warning_upper, metric)}%` }}
-          />
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{meta}</span>
+        {overLimit > 0 && (
+          <span className="shrink-0 font-semibold text-danger">
+            {overLimit} {inverted ? `under ${metric.warning_upper} ${metric.unit}` : "over limit"}
+          </span>
         )}
       </div>
 
-      {/* Tooltip / legend */}
-      <div className="flex justify-between text-xs text-muted-foreground">
+      <DiveBar
+        dives={dives}
+        hovered={hoveredDive}
+        onHover={setHoveredDive}
+        color={(dive) => ({ className: ZONE_COLORS[dive.zone] })}
+      >
+        {hasThresholds &&
+          [...new Set([metric.safe_upper, metric.warning_upper])].map((threshold) => (
+            <div
+              key={threshold}
+              className="absolute inset-y-0 w-px bg-foreground/30"
+              style={{ left: `${_thresholdPercent(threshold, metric)}%` }}
+            />
+          ))}
+      </DiveBar>
+
+      <div className="text-xs text-muted-foreground">
         {hoveredDive ? (
           <span className={ZONE_TEXT[hoveredDive.zone]}>
             Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(1)} {metric.unit}
           </span>
         ) : (
-          <span>Min: {fmt(metric.min_val)}</span>
+          <span>{legend || "\u00a0"}</span>
         )}
-        {!hoveredDive && <span>Max: {fmt(metric.max_val)}</span>}
       </div>
     </div>
   );

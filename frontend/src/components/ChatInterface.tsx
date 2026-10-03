@@ -38,7 +38,7 @@ export function ChatInterface({
           <div className="mt-[30%] text-center text-muted-foreground">
             <p className="text-lg">Ask about your dives</p>
             <p className="mt-1 text-sm">
-              DiveRoast will analyze your dives and roast your questionable decisions
+              The roast is on the dashboard. Ask for a closer look at any dive or habit.
             </p>
           </div>
         )}

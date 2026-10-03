@@ -124,7 +124,9 @@ function App() {
               open={chatOpen}
               onOpenChange={setChatOpen}
               sessionId={sessionId!}
-              messages={messages}
+              // The first exchange is the auto-sent roast request and the roast,
+              // which the dashboard already shows.
+              messages={messages.slice(2)}
               isLoading={isLoading}
               onSendMessage={sendMessage}
             />

@@ -2,16 +2,16 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Share2, Waves } from "lucide-react";
-import type { AggregateStats } from "@/types";
 
 interface Props {
-  stats: AggregateStats;
+  /** What the page is about: "144 dives" or "Dive #529 · Elphinstone". */
+  subject: string;
   onToggleChat?: () => void;
   shareUrl?: string;
   readOnly?: boolean;
 }
 
-export function DashboardHeader({ stats, onToggleChat, shareUrl, readOnly }: Props) {
+export function DashboardHeader({ subject, onToggleChat, shareUrl, readOnly }: Props) {
   const [copied, setCopied] = useState(false);
 
   const handleShare = async () => {
@@ -22,12 +22,12 @@ export function DashboardHeader({ stats, onToggleChat, shareUrl, readOnly }: Pro
   };
 
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <Waves className="h-7 w-7 text-primary" />
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <Waves className="h-7 w-7 shrink-0 text-primary" />
         <h1 className="text-2xl font-bold tracking-tight">DiveRoast</h1>
-        <Badge variant="secondary" className="text-sm">
-          {stats.total_dives} {stats.total_dives === 1 ? "dive" : "dives"}
+        <Badge variant="secondary" className="min-w-0 text-sm">
+          <span className="truncate">{subject}</span>
         </Badge>
         {readOnly && (
           <Badge variant="outline" className="text-xs text-muted-foreground">
@@ -35,7 +35,7 @@ export function DashboardHeader({ stats, onToggleChat, shareUrl, readOnly }: Pro
           </Badge>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {shareUrl && (
           <Button variant="outline" size="sm" onClick={handleShare}>
             <Share2 className="mr-2 h-4 w-4" />

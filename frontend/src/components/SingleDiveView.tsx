@@ -8,41 +8,47 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, ArrowUp, ArrowUpToLine, Anchor, Clock, Gauge, Thermometer, Wind } from "lucide-react";
+import { AlertTriangle, ArrowUp, ArrowUpToLine } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { AscentEvent, DiveFeature, SingleDive } from "@/types";
+import { METRICS, NOT_RECORDED, ZONE_TEXT, fmtValue, metricKind, type MetricKind, type Zone } from "@/lib/metrics";
+import type { AscentEvent, DiveFeature, MetricRange, SingleDive } from "@/types";
 
 interface Props {
   dive: SingleDive;
   features: DiveFeature;
+  metrics: MetricRange[];
 }
 
 const EVENT_STYLE = {
-  sustained: { color: "var(--warning)", label: "Sustained fast ascent (30 s)", Icon: ArrowUp },
-  surfacing: { color: "var(--danger)", label: "Bolted to the surface (last 8 m)", Icon: ArrowUpToLine },
+  sustained: { color: "var(--warning)", Icon: ArrowUp },
+  surfacing: { color: "var(--danger)", Icon: ArrowUpToLine },
 } as const;
+
+type EventKind = keyof typeof EVENT_STYLE;
+
+const eventKind = (e: AscentEvent): EventKind => (e.kind in EVENT_STYLE ? (e.kind as EventKind) : "sustained");
 
 const mmss = (seconds: number) => {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-const fmt = (v: number | null | undefined, digits: number, unit: string) =>
-  v == null ? "not recorded" : `${v.toFixed(digits)} ${unit}`;
-
-function Stat({ icon: Icon, label, value }: { icon: typeof Anchor; label: string; value: string }) {
+function Stat({ label, qualifier, value, zone }: { label: string; qualifier?: string; value: string; zone?: Zone }) {
+  const recorded = value !== NOT_RECORDED;
   return (
-    <Card>
-      <CardContent className="flex items-center gap-3 pt-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <Icon className="h-5 w-5 text-primary" />
-        </div>
-        <div>
-          <div className="text-lg font-bold">{value}</div>
-          <div className="text-xs text-muted-foreground">{label}</div>
-        </div>
-      </CardContent>
-    </Card>
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={
+          recorded
+            ? `text-lg font-bold ${zone && zone !== "safe" ? ZONE_TEXT[zone] : ""}`
+            : "text-sm leading-7 text-muted-foreground"
+        }
+      >
+        {value}
+      </div>
+      {qualifier && <div className="text-[11px] text-muted-foreground/70">{qualifier}</div>}
+    </div>
   );
 }
 
@@ -59,27 +65,47 @@ function ProfileTooltip({ active, payload }: { active?: boolean; payload?: { pay
   );
 }
 
-function EventRow({ event }: { event: AscentEvent }) {
-  const style = EVENT_STYLE[event.kind as keyof typeof EVENT_STYLE] ?? EVENT_STYLE.sustained;
-  const { Icon } = style;
+/** One problem: its headline, the explanation, and when it happened on the profile. */
+function Problem({ kind, title, body, events }: { kind?: EventKind; title: string; body?: string; events: AscentEvent[] }) {
+  const color = kind ? EVENT_STYLE[kind].color : "var(--danger)";
+  const Icon = kind ? EVENT_STYLE[kind].Icon : AlertTriangle;
   return (
-    <li className="flex items-center gap-3 text-sm">
+    <li className="flex gap-3 text-sm">
       <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-        style={{ background: `color-mix(in oklch, ${style.color} 20%, transparent)` }}
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+        style={{ background: `color-mix(in oklch, ${color} 20%, transparent)` }}
       >
-        <Icon className="h-3.5 w-3.5" style={{ color: style.color }} aria-hidden />
+        <Icon className="h-3.5 w-3.5" style={{ color }} aria-hidden />
       </span>
-      <span className="text-foreground">{style.label}</span>
-      <span className="text-muted-foreground">
-        {event.rate.toFixed(1)} m/min · {mmss(event.start_s)}–{mmss(event.end_s)}
-      </span>
+      <div className="min-w-0 space-y-1">
+        <div className="font-medium text-foreground">{title}</div>
+        {body && <div className="text-muted-foreground">{body}</div>}
+        {events.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {events.map((e, i) => (
+              <span key={i} className="rounded-full border border-border px-2 py-0.5 text-muted-foreground">
+                {e.rate.toFixed(1)} m/min · {mmss(e.start_s)}–{mmss(e.end_s)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </li>
   );
 }
 
-/** One dive in detail: its profile, where it went wrong, and its numbers. */
-export function SingleDiveView({ dive, features }: Props) {
+/** Which ascent events an issue line ("HIGH ASCENT RATE: ...") is describing. */
+function issueKind(title: string): EventKind | undefined {
+  if (/bolted/i.test(title)) return "surfacing";
+  if (/ascent/i.test(title)) return "sustained";
+  return undefined;
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const sentenceCase = (s: string) => capitalize(s.toLowerCase());
+
+/** One dive in detail: its numbers, its profile, and where it went wrong. */
+export function SingleDiveView({ dive, features, metrics }: Props) {
   const data = dive.profile.map((p) => ({ t: p.time_s / 60, depth: p.depth, temperature: p.temperature }));
   const maxDepth = Math.max(...dive.profile.map((p) => p.depth), 1);
   const durationMin = data.length ? data[data.length - 1].t - data[0].t : 0;
@@ -91,23 +117,63 @@ export function SingleDiveView({ dive, features }: Props) {
     const pad = Math.max(0, durationMin * 0.015 - (end - start)) / 2;
     return { x1: start - pad, x2: end + pad };
   };
-  const ndl = features.entered_deco ? "entered deco" : fmt(features.min_ndl, 0, "min");
+
+  const zone = (kind: MetricKind): Zone | undefined =>
+    metrics.find((m) => metricKind(m.label) === kind)?.per_dive[0]?.zone;
+
+  // Issues carry the explanation, ascent events the timing: show them as one list.
+  const problems = dive.issues.map((issue) => {
+    const [head, ...rest] = issue.split(": ");
+    const kind = issueKind(head);
+    return {
+      kind,
+      title: sentenceCase(head),
+      body: capitalize(rest.join(": ")),
+      events: kind ? dive.ascent_events.filter((e) => eventKind(e) === kind) : [],
+    };
+  });
+  const explained = new Set(problems.map((p) => p.kind));
+  (["sustained", "surfacing"] as const)
+    .filter((kind) => !explained.has(kind))
+    .forEach((kind) => {
+      const events = dive.ascent_events.filter((e) => eventKind(e) === kind);
+      if (events.length > 0) {
+        problems.push({
+          kind,
+          title: kind === "sustained" ? "Sustained fast ascent" : "Bolted to the surface",
+          body: "",
+          events,
+        });
+      }
+    });
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat icon={Anchor} label="Max depth" value={`${features.max_depth.toFixed(1)} m`} />
-        <Stat icon={Clock} label="Duration" value={`${dive.duration_min.toFixed(0)} min`} />
-        <Stat icon={ArrowUp} label="Max sustained ascent (30 s)" value={`${features.max_ascend_speed.toFixed(1)} m/min`} />
-        <Stat
-          icon={ArrowUpToLine}
-          label="Fastest surfacing (last 8 m)"
-          value={fmt(features.max_shallow_ascend_speed, 1, "m/min")}
-        />
-        <Stat icon={Gauge} label="Min NDL" value={ndl} />
-        <Stat icon={Wind} label="SAC rate" value={fmt(features.sac_rate, 1, "L/min")} />
-        <Stat icon={Thermometer} label="Avg temperature" value={fmt(features.avg_temp, 1, "°C")} />
-      </div>
+      <Card>
+        <CardContent className="grid grid-cols-2 gap-x-4 gap-y-5 pt-5 sm:grid-cols-4 lg:grid-cols-7">
+          <Stat label={METRICS.depth.name} value={fmtValue(features.max_depth, 1, "m")} zone={zone("depth")} />
+          <Stat label="Duration" value={`${dive.duration_min.toFixed(0)} min`} />
+          <Stat
+            label={METRICS.sustained.name}
+            qualifier={METRICS.sustained.qualifier}
+            value={fmtValue(features.max_ascend_speed, 1, "m/min")}
+            zone={zone("sustained")}
+          />
+          <Stat
+            label={METRICS.surfacing.name}
+            qualifier={METRICS.surfacing.qualifier}
+            value={fmtValue(features.max_shallow_ascend_speed, 1, "m/min")}
+            zone={zone("surfacing")}
+          />
+          <Stat
+            label={METRICS.ndl.name}
+            value={features.entered_deco ? "entered deco" : fmtValue(features.min_ndl, 0, "min")}
+            zone={features.entered_deco ? "danger" : zone("ndl")}
+          />
+          <Stat label={METRICS.sac.name} value={fmtValue(features.sac_rate, 1, "L/min")} zone={zone("sac")} />
+          <Stat label={METRICS.temp.name} qualifier="average" value={fmtValue(features.avg_temp, 1, "°C")} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">
@@ -142,7 +208,7 @@ export function SingleDiveView({ dive, features }: Props) {
                   <ReferenceArea
                     key={i}
                     {...band(e)}
-                    fill={EVENT_STYLE[e.kind as keyof typeof EVENT_STYLE]?.color ?? "var(--warning)"}
+                    fill={EVENT_STYLE[eventKind(e)].color}
                     fillOpacity={0.35}
                     strokeOpacity={0}
                   />
@@ -163,37 +229,22 @@ export function SingleDiveView({ dive, features }: Props) {
             </ResponsiveContainer>
           </div>
 
-          {dive.ascent_events.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {dive.ascent_events.map((e, i) => (
-                <EventRow key={i} event={e} />
-              ))}
-            </ul>
+          {problems.length > 0 ? (
+            <div className="mt-5 border-t border-border pt-4">
+              <h3 className="mb-3 text-sm font-semibold">What went wrong</h3>
+              <ul className="space-y-3">
+                {problems.map((p) => (
+                  <Problem key={p.title} {...p} />
+                ))}
+              </ul>
+            </div>
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">
-              No fast ascents: sustained rate and every surfacing stayed at or under 10 m/min.
+              Nothing flagged: sustained ascent and every surfacing stayed at or under 10 m/min, and no other limit was crossed.
             </p>
           )}
         </CardContent>
       </Card>
-
-      {dive.issues.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="h-4 w-4 text-danger" aria-hidden />
-              Issues on this dive
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="list-disc space-y-1.5 pl-5 text-sm text-foreground">
-              {dive.issues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

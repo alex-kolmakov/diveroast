@@ -1,24 +1,21 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Anchor, ArrowUp, Wind, Thermometer, TriangleAlert, User, MapPin, Waves, Award } from "lucide-react";
+import { Award, MapPin, Waves, Anchor } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
-import { RangeGauge } from "@/components/RangeGauge";
+import { RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
+import { metricKind } from "@/lib/metrics";
 import { lazy, Suspense } from "react";
 
 // Loaded on demand: it pulls in the charting library, which log mode never needs.
 const SingleDiveView = lazy(() =>
   import("@/components/SingleDiveView").then((m) => ({ default: m.SingleDiveView }))
 );
-import type { ChatMessage, DashboardData } from "@/types";
+import type { ChatMessage, DashboardData, DiverProfile } from "@/types";
 
-// Temperature labels that belong in the dedicated temp section, not Water Types
+// Temperature labels that belong in the temperature gauge, not Water Types
 const TEMP_WATER_TYPES = new Set(["Cold water", "Temperate", "Tropical"]);
-
-const COLD_COLOR = "#3b82f6";
-const TEMP_COLOR = "#22c55e";
-const TROP_COLOR = "#ef4444";
 
 interface Props {
   data: DashboardData;
@@ -29,25 +26,14 @@ interface Props {
   readOnly?: boolean;
 }
 
-const STAT_ICONS = [
-  { icon: Anchor, label: "Avg Max Depth", suffix: "m" },
-  { icon: Wind, label: "Avg SAC Rate", suffix: "" },
-  { icon: ArrowUp, label: "Avg Max Ascent", suffix: "" },
-  { icon: TriangleAlert, label: "Fast Ascents · Surface Bolts", suffix: "" },
-];
-
 export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
   const single = data.mode === "single" && data.single_dive && data.all_dives.length === 1;
-  const statValues = [
-    data.aggregate_stats.avg_max_depth.toFixed(1),
-    data.aggregate_stats.avg_sac_rate != null
-      ? data.aggregate_stats.avg_sac_rate.toFixed(1)
-      : "not recorded",
-    data.aggregate_stats.avg_max_ascend_speed.toFixed(1),
-    data.aggregate_stats.dives_with_fast_ascent != null
-      ? `${data.aggregate_stats.dives_with_fast_ascent} · ${data.aggregate_stats.dives_with_shallow_bolt ?? "–"}`
-      : "–",
-  ];
+  const total = data.aggregate_stats.total_dives;
+  const site = single ? data.all_dives[0].dive_site_name : null;
+  const subject = single
+    ? `Dive #${data.single_dive!.dive_number}${site && site !== "N/A" ? ` · ${site}` : ""}`
+    : `${total} ${total === 1 ? "dive" : "dives"}`;
+  const worst = data.top_problematic_dives;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -61,229 +47,88 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
           </div>
         )}
 
-        <DashboardHeader
-          stats={data.aggregate_stats}
-          onToggleChat={onToggleChat}
-          shareUrl={shareUrl}
-          readOnly={readOnly}
-        />
+        <div className="space-y-3">
+          <DashboardHeader subject={subject} onToggleChat={onToggleChat} shareUrl={shareUrl} readOnly={readOnly} />
+          {!single && data.diver_profile && <ProfileStrip profile={data.diver_profile} />}
+        </div>
 
         <Separator />
 
-        {single ? (
-          <>
-            <Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-muted/30" />}>
-              <SingleDiveView dive={data.single_dive!} features={data.all_dives[0]} />
-            </Suspense>
-            <AgentRoastSummary
-              messages={messages}
-              isLoading={isLoading}
-              staticText={readOnly ? data.roast_summary : undefined}
-            />
-          </>
-        ) : (
-        <>
-        {/* Aggregate stats */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {STAT_ICONS.map(({ icon: Icon, label, suffix }, i) => (
-            <Card key={label}>
-              <CardContent className="flex items-center gap-3 pt-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <Icon className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <div className="text-xl font-bold">{statValues[i]}{suffix}</div>
-                  <div className="text-xs text-muted-foreground">{label}</div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* Metric gauges grid */}
-        <div>
-          <h2 className="mb-4 text-lg font-semibold">Dive Metrics</h2>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {data.metrics.map((metric) => (
-              <Card key={metric.label}>
-                <CardContent className="pt-4">
-                  <RangeGauge metric={metric} />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-
-        {/* Agent roast summary — live sessions stream from messages; shared views use snapshot */}
+        {/* The roast — live sessions stream from messages; shared views use the snapshot */}
         <AgentRoastSummary
           messages={messages}
           isLoading={isLoading}
           staticText={readOnly ? data.roast_summary : undefined}
+          staticSources={data.roast_sources}
         />
 
-        {/* Diver Profile */}
-        {data.diver_profile && (
-          <div>
-            <h2 className="mb-4 text-lg font-semibold">Diver Profile</h2>
-            <div className="space-y-3">
-              {/* Main profile row */}
-              <Card>
-                <CardContent className="grid gap-4 pt-4 md:grid-cols-2 lg:grid-cols-4">
-                  {(() => {
-                    const nonTempWaterTypes = data.diver_profile.water_types.filter(
-                      (t) => !TEMP_WATER_TYPES.has(t)
-                    );
-                    return (
-                      <>
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                            <Award className="h-5 w-5 text-primary" />
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium capitalize">{data.diver_profile.experience_level}</div>
-                            <div className="text-xs text-muted-foreground">Experience Level</div>
-                          </div>
-                        </div>
-                        {nonTempWaterTypes.length > 0 && (
-                          <div className="flex items-start gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                              <Waves className="h-5 w-5 text-primary" />
-                            </div>
-                            <div>
-                              <div className="text-sm font-medium">{nonTempWaterTypes.join(", ")}</div>
-                              <div className="text-xs text-muted-foreground">Water Types</div>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                  {data.diver_profile.regions.length > 0 && (
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                        <MapPin className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">{data.diver_profile.regions.join(", ")}</div>
-                        <div className="text-xs text-muted-foreground">Regions</div>
-                      </div>
-                    </div>
-                  )}
-                  {data.diver_profile.dive_sites.length > 0 && (
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                        <User className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">{data.diver_profile.dive_sites.length} sites</div>
-                        <div className="text-xs text-muted-foreground">Dive Sites Visited</div>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Temperature exposure row */}
-              {data.diver_profile.temp_exposure &&
-                Object.keys(data.diver_profile.temp_exposure).length > 0 && (
-                  <TemperatureExposureCard exposure={data.diver_profile.temp_exposure} />
-                )}
+        {single ? (
+          <Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-muted/30" />}>
+            <SingleDiveView dive={data.single_dive!} features={data.all_dives[0]} metrics={data.metrics} />
+          </Suspense>
+        ) : (
+          <>
+            <div>
+              <h2 className="mb-4 text-lg font-semibold">Dive Metrics</h2>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {data.metrics.map((metric) => (
+                  <Card key={metric.label}>
+                    <CardContent className="pt-4">
+                      {metricKind(metric.label) === "temp" ? (
+                        <TemperatureGauge metric={metric} exposure={data.diver_profile?.temp_exposure} />
+                      ) : (
+                        <RangeGauge metric={metric} />
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
 
-        {/* Top 3 worst dives */}
-        {data.top_problematic_dives.length > 0 && (
-          <div>
-            <h2 className="mb-4 text-lg font-semibold">Top 3 Worst Dives</h2>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {data.top_problematic_dives.map((dive, i) => (
-                <ProblematicDiveCard key={dive.dive_number} dive={dive} rank={i + 1} />
-              ))}
-            </div>
-          </div>
-        )}
-        </>
+            {worst.length > 0 && (
+              <div>
+                <h2 className="mb-4 text-lg font-semibold">
+                  {worst.length === 1 ? "Worst Dive" : `Top ${worst.length} Worst Dives`}
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {worst.map((dive, i) => (
+                    <ProblematicDiveCard key={dive.dive_number} dive={dive} rank={i + 1} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function TemperatureExposureCard({ exposure }: { exposure: Record<string, number> }) {
-  const cold = exposure["Cold (<15°C)"] ?? 0;
-  const temperate = exposure["Temperate (15-24°C)"] ?? 0;
-  const tropical = exposure["Tropical (>24°C)"] ?? 0;
-  const total = cold + temperate + tropical || 1;
-  const coldPct = (cold / total) * 100;
-  const tempPct = (temperate / total) * 100;
-  const tropPct = (tropical / total) * 100;
-  const title = _tempTitle(cold, temperate, tropical, total);
+/** Who this diver is, on one line under the header. */
+function ProfileStrip({ profile }: { profile: DiverProfile }) {
+  const waterTypes = profile.water_types.filter((t) => !TEMP_WATER_TYPES.has(t));
+  const sites = profile.dive_sites.length;
+  const items = [
+    { Icon: Award, label: "Experience level", value: profile.experience_level, capitalize: true },
+    waterTypes.length > 0 && { Icon: Waves, label: "Water types", value: waterTypes.join(", ") },
+    profile.regions.length > 0 && { Icon: MapPin, label: "Regions", value: profile.regions.join(", ") },
+    sites > 0 && {
+      Icon: Anchor,
+      label: "Dive sites visited",
+      value: `${sites} ${sites === 1 ? "site" : "sites"}`,
+      title: profile.dive_sites.join(", "),
+    },
+  ].filter((item) => !!item);
 
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            <Thermometer className="h-5 w-5 text-primary" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-baseline justify-between mb-2">
-              <div className="text-sm font-medium">Temperature Exposure</div>
-              <div className="text-xs font-semibold" style={{ color: _titleColor(cold, temperate, tropical) }}>
-                {title}
-              </div>
-            </div>
-            <div className="h-3 w-full rounded-full overflow-hidden">
-              <div className="flex h-full w-full">
-                {coldPct > 0 && <div className="h-full" style={{ width: `${coldPct}%`, background: COLD_COLOR }} />}
-                {tempPct > 0 && <div className="h-full" style={{ width: `${tempPct}%`, background: TEMP_COLOR }} />}
-                {tropPct > 0 && <div className="h-full" style={{ width: `${tropPct}%`, background: TROP_COLOR }} />}
-              </div>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {cold > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  <span className="font-semibold" style={{ color: COLD_COLOR }}>{cold}</span> Cold (&lt;15°C) · {coldPct.toFixed(0)}%
-                </span>
-              )}
-              {temperate > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  <span className="font-semibold" style={{ color: TEMP_COLOR }}>{temperate}</span> Temperate (15–24°C) · {tempPct.toFixed(0)}%
-                </span>
-              )}
-              {tropical > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  <span className="font-semibold" style={{ color: TROP_COLOR }}>{tropical}</span> Tropical (&gt;24°C) · {tropPct.toFixed(0)}%
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <ul className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
+      {items.map(({ Icon, label, value, capitalize, title }) => (
+        <li key={label} className="flex items-center gap-1.5" title={title ?? label}>
+          <Icon className="h-4 w-4 text-primary" aria-hidden />
+          <span className="sr-only">{label}:</span>
+          <span className={capitalize ? "capitalize text-foreground" : "text-foreground"}>{value}</span>
+        </li>
+      ))}
+    </ul>
   );
-}
-
-function _tempTitle(cold: number, temperate: number, tropical: number, total: number): string {
-  const cPct = cold / total;
-  const tPct = temperate / total;
-  const trPct = tropical / total;
-
-  if (trPct >= 0.85) return "Coral Chaser";
-  if (trPct >= 0.65) return "Warmwater Regular";
-  if (cPct >= 0.85) return "Ice Diver";
-  if (cPct >= 0.65) return "Cold Water Devotee";
-  if (tPct >= 0.65) return "Temperate Explorer";
-  if (cPct >= 0.4 && trPct <= 0.2) return "Cold Water Diver";
-  if (trPct >= 0.4 && cPct <= 0.2) return "Sun Seeker";
-  if (Math.abs(cPct - trPct) < 0.15 && tPct < 0.3) return "Extreme Contrarian";
-  return "All-Around Diver";
-}
-
-function _titleColor(cold: number, temperate: number, tropical: number): string {
-  const total = cold + temperate + tropical || 1;
-  if (tropical / total >= 0.65) return TROP_COLOR;
-  if (cold / total >= 0.65) return COLD_COLOR;
-  return TEMP_COLOR;
 }
