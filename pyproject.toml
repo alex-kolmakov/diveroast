@@ -35,6 +35,10 @@ dependencies = [
     "openinference-instrumentation-google-genai>=0.1",
     # Embeddings
     "sentence-transformers>=3.1",
+    # Direct dependency only so [tool.uv.sources] applies: CPU-only wheels on
+    # Linux. The server never uses a GPU; CUDA wheels add ~5 GB to the image.
+    "torch>=2.4",
+    # Security
     "defusedxml>=0.7",
 ]
 
@@ -48,6 +52,14 @@ dev = [
     "pre-commit>=3.7",
     "httpx>=0.27",
 ]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

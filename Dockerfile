@@ -2,23 +2,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install uv for fast dependency management
-RUN pip install uv
+# Pinned uv: the lockfile format (revision 3) needs a recent uv.
+RUN pip install --no-cache-dir "uv==0.12.19"
 
-# Copy only the dependency manifest first — everything below this line is
-# cached between deploys as long as pyproject.toml hasn't changed.
-COPY pyproject.toml .
+# Install from uv.lock into a venv, so the image runs the tested versions.
+# torch comes from the CPU-only index on Linux (see [tool.uv.sources]); the
+# uv cache lives in a BuildKit cache mount, not in an image layer.
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Stub out the package so `uv pip install .` can resolve dependencies
-# without needing the real source tree.
-RUN mkdir -p src && touch src/__init__.py
-
-# Install dependencies (cached layer — only busts when pyproject.toml changes)
-RUN uv pip install --system .
-
-# Pre-download cross-encoder model into image cache to avoid HuggingFace
-# downloads on Cloud Run cold starts (no outbound internet in production).
-RUN uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('Cross-encoder cached')"
+# Pre-download the cross-encoder model so the first request doesn't wait on a
+# HuggingFace download.
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('Cross-encoder cached')"
 
 # Create dlt config (embedding provider must be set before ingestion).
 # dlt telemetry is off: the server has no reason to report usage to dltHub.
