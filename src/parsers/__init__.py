@@ -1,9 +1,13 @@
+from src.parsers.archive import ArchiveParser
 from src.parsers.base import DiveLogParser
+from src.parsers.garmin_fit import GarminFitParser
 from src.parsers.subsurface import SubsurfaceParser
 
 PARSER_REGISTRY: dict[str, type[DiveLogParser]] = {
     ".ssrf": SubsurfaceParser,
     ".xml": SubsurfaceParser,
+    ".fit": GarminFitParser,
+    ".zip": ArchiveParser,
 }
 
 
