@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -14,7 +15,14 @@ from src.analysis.feature_engineering import extract_features
 from src.config import settings
 from src.observability import get_tracer
 from src.rag.search import Retrieval
-from src.tools.dive import build_anomaly_keywords, coverage_line, fmt, measured
+from src.tools import dan
+from src.tools.dive import (
+    anomaly_queries,
+    build_anomaly_keywords,
+    coverage_line,
+    fmt,
+    measured,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +30,46 @@ FORCE_ANSWER_NOTE = (
     "[System: tool-call limit reached. Answer now using the tool results "
     "you already have.]"
 )
+
+
+# Chunks kept per query in the search that runs before every answer.
+PRIOR_SEARCH_TOP_K = 3
+
+DAN_MATERIAL_NOTE = (
+    "\n\n# DAN material\n"
+    "Already searched for this message. Cite it only where it backs your "
+    "point, using the source title and URL shown; a hit that doesn't fit is "
+    "not a citation.\n\n{material}"
+)
+NO_DAN_MATERIAL_NOTE = (
+    "\n\n# DAN material\n"
+    "Already searched for this message: nothing relevant was found. Don't "
+    "cite DAN unless a search you run yourself returns something."
+)
+
+
+# "([DAN: Title](url))", with or without the outer parentheses
+_DAN_LINK = re.compile(r"\s*\(?\[DAN: ([^\]]+)\]\(([^)\s]+)\)\)?")
+
+
+def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
+    """Make every DAN citation point at an article that was really retrieved.
+
+    Models sometimes mangle the URL. A citation whose title matches a
+    retrieved article gets that article's URL; one that matches nothing is
+    removed, so the answer never links to a DAN page nobody looked up.
+    """
+    by_url = {s["url"].rstrip("/"): s for s in sources}
+    by_title = {s["title"].strip().lower(): s for s in sources}
+
+    def fix(match: re.Match) -> str:
+        title, url = match.group(1), match.group(2)
+        source = by_url.get(url.rstrip("/")) or by_title.get(title.strip().lower())
+        if source is None:
+            return ""
+        return f" ([DAN: {source['title']}]({source['url']}))"
+
+    return _DAN_LINK.sub(fix, text)
 
 
 def _dive_line(row) -> str:
@@ -192,6 +240,27 @@ class DiverRoastAgent:
         """Build RAG-enriching keywords from measured dive anomalies."""
         return build_anomaly_keywords(getattr(self, "features", None))
 
+    def _prior_search(self, user_message: str) -> str:
+        """Search DAN before the model answers; return a system-prompt section.
+
+        Grounding shouldn't depend on the model choosing to call a search
+        tool: cheaper models answer without one. Searches the message itself
+        and each anomaly measured in the log, as separate queries. The result
+        is for this turn only and is not written to the history.
+        """
+        queries = [user_message, *anomaly_queries(getattr(self, "features", None))]
+        try:
+            found = dan.search_dan(queries, top_k=PRIOR_SEARCH_TOP_K)
+        except Exception:
+            logger.warning(
+                "Prior DAN search failed; answering without it", exc_info=True
+            )
+            return ""
+        if not found.sources:
+            return NO_DAN_MATERIAL_NOTE
+        self.last_sources.extend(found.sources)
+        return DAN_MATERIAL_NOTE.format(material=found.text)
+
     def _execute_tool(self, function_call: types.FunctionCall) -> str:
         """Execute a tool function call and return the result text."""
         tracer = get_tracer()
@@ -263,6 +332,7 @@ class DiverRoastAgent:
     def _run_turn(self, user_message: str, prompt_ver: PromptVersion) -> str:
         """Run one user turn through the bounded function-calling loop.
 
+        DAN is searched first and the material added to the system prompt.
         At most ``AGENT_MAX_STEPS`` tool rounds; after that the model is
         forced to answer with tools disabled. The first round (choosing
         tools) runs at ``AGENT_TOOL_TEMPERATURE``, later rounds (usually the
@@ -270,6 +340,7 @@ class DiverRoastAgent:
         """
         self.last_sources = []
         self.last_prompt = self._describe_prompt(prompt_ver)
+        system_instruction = prompt_ver.prompt + self._prior_search(user_message)
         self.history.append(
             types.Content(
                 role="user",
@@ -292,7 +363,7 @@ class DiverRoastAgent:
                     )
                 )
             config = types.GenerateContentConfig(
-                system_instruction=prompt_ver.prompt,
+                system_instruction=system_instruction,
                 tools=tools,
                 temperature=settings.AGENT_TOOL_TEMPERATURE
                 if step == 0
@@ -325,7 +396,7 @@ class DiverRoastAgent:
                 )
                 continue
 
-            text = response.text or ""
+            text = repair_dan_links(response.text or "", self.last_sources)
             if text:
                 self.history.append(
                     types.Content(

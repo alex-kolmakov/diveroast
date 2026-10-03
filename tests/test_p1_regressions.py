@@ -421,7 +421,8 @@ def test_agent_loop_is_bounded():
     agent._client = client
 
     prompt = MagicMock(prompt="p", label="test", version=0, phoenix_version_id=None)
-    agent._run_turn("roast me", prompt)
+    with patch.object(agent, "_prior_search", return_value=""):
+        agent._run_turn("roast me", prompt)
 
     calls = client.models.generate_content.call_args_list
     assert len(calls) == settings.AGENT_MAX_STEPS + 1
@@ -490,3 +491,71 @@ def test_only_linked_sources_count_as_cited():
     ]
     text = "Bolting is how you get bent ([DAN: Ascent](https://dan.org/ascent))."
     assert [s["cited"] for s in _mark_cited(sources, text)] == [True, False]
+
+
+def _answering_client(text="Slow down."):
+    client = MagicMock()
+    client.models.generate_content.return_value = types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(role="model", parts=[types.Part(text=text)])
+            )
+        ]
+    )
+    return client
+
+
+def test_dan_is_searched_before_every_answer(sparse_df):
+    """Grounding must not depend on the model calling a search tool."""
+    from src.rag.search import Retrieval
+
+    agent = DiverRoastAgent()
+    agent.set_dive_data(sparse_df)
+    agent._client = _answering_client()
+    history_before = len(agent.history)
+    found = Retrieval(
+        text="[Source: Ascent Rates](https://dan.org/ascent)\nGo slow.",
+        sources=[{"title": "Ascent Rates", "url": "https://dan.org/ascent"}],
+    )
+    prompt = MagicMock(prompt="p", label="test", version=0, phoenix_version_id=None)
+    with patch("src.agent.conversation.dan.search_dan", return_value=found) as search:
+        agent._run_turn("roast me", prompt)
+        agent._run_turn("and my air?", prompt)
+
+    assert search.call_count == 2
+    queries = search.call_args.args[0]
+    assert queries[0] == "and my air?"  # the message, then one query per anomaly
+    assert len(queries) > 1
+    config = agent._client.models.generate_content.call_args.kwargs["config"]
+    assert "Go slow." in config.system_instruction
+    assert agent.last_sources == found.sources
+    # The material is for the turn only: history holds the two exchanges, nothing else.
+    assert len(agent.history) == history_before + 4
+    assert all("Go slow." not in (p.text or "") for c in agent.history for p in c.parts)
+
+
+def test_prior_search_failure_does_not_break_the_answer():
+    agent = DiverRoastAgent()
+    agent._client = _answering_client("Fine.")
+    prompt = MagicMock(prompt="p", label="test", version=0, phoenix_version_id=None)
+    with patch(
+        "src.agent.conversation.dan.search_dan", side_effect=RuntimeError("no table")
+    ):
+        assert agent._run_turn("hi", prompt) == "Fine."
+    config = agent._client.models.generate_content.call_args.kwargs["config"]
+    assert config.system_instruction == "p"
+
+
+def test_dan_citations_only_link_retrieved_articles():
+    from src.agent.conversation import repair_dan_links
+
+    sources = [{"title": "Ascent Rates", "url": "https://dan.org/ascent-rates/"}]
+    good = "Slow down ([DAN: Ascent Rates](https://dan.org/ascent-rates/))."
+    assert repair_dan_links(good, sources) == good
+    # Right article, mangled URL: point it at the real one.
+    mangled = "Slow down ([DAN: Ascent Rates](https://dan.org/ascents/))."
+    assert repair_dan_links(mangled, sources) == good
+    # Nothing like it was retrieved: the citation goes, the sentence stays.
+    invented = "Slow down ([DAN: Bubbles](https://dan.org/bubbles/))."
+    assert repair_dan_links(invented, sources) == "Slow down."
+    assert repair_dan_links(invented, []) == "Slow down."

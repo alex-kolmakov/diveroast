@@ -313,13 +313,13 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
     )
 
 
-def build_anomaly_keywords(features: pd.DataFrame | None) -> str:
-    """RAG-enriching keywords for anomalies actually measured in the log.
+def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
+    """One DAN search phrase per anomaly actually measured in the log.
 
-    NaN never triggers a keyword.
+    NaN never triggers a phrase.
     """
     if features is None or features.empty:
-        return ""
+        return []
     keywords: list[str] = []
     if features["max_ascend_speed"].max() > ASCENT_LIMIT_M_MIN:
         keywords.append("rapid ascent decompression sickness")
@@ -333,4 +333,9 @@ def build_anomaly_keywords(features: pd.DataFrame | None) -> str:
         keywords.append("high air consumption SAC rate breathing")
     if features["max_depth"].max() > DEEP_M:
         keywords.append("deep diving incident")
-    return " ".join(keywords)
+    return keywords
+
+
+def build_anomaly_keywords(features: pd.DataFrame | None) -> str:
+    """The anomaly phrases joined into one string, to enrich a search query."""
+    return " ".join(anomaly_queries(features))

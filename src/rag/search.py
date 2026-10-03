@@ -1,3 +1,5 @@
+import html
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import lancedb
@@ -81,7 +83,8 @@ def format_results(results: pd.DataFrame) -> Retrieval:
     sources: list[dict[str, str]] = []
     seen: set[str] = set()
     for _, row in results.iterrows():
-        title = str(row.get("title") or "").strip()
+        # WordPress titles arrive HTML-escaped ("Can&#8217;t")
+        title = html.unescape(str(row.get("title") or "")).strip()
         url = str(row.get("url") or "").strip()
         header = f"[Source: {title or 'DAN'}]({url})" if url else "[Source: DAN]"
         chunks.append(f"{header}\n{row['value']}")
@@ -101,6 +104,24 @@ def retrieve(query: str, top_k: int | None = None) -> Retrieval:
         db = lancedb.connect(settings.LANCEDB_URI)
         dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
         return format_results(hybrid_search(dbtable, query, top_k))
+
+
+def retrieve_many(queries: list[str], top_k: int | None = None) -> Retrieval:
+    """Retrieve for several queries, ``top_k`` chunks each, every chunk once.
+
+    Separate searches keep each query focused: joined into one string, the
+    phrases dilute each other and the same generic chunks win every time.
+    """
+    db = lancedb.connect(settings.LANCEDB_URI)
+    dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
+    queries = [query for query in queries if query]
+    # Reranking dominates and runs outside the GIL, so the searches overlap.
+    with ThreadPoolExecutor(max_workers=max(len(queries), 1)) as pool:
+        frames = list(pool.map(lambda q: hybrid_search(dbtable, q, top_k), queries))
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return Retrieval(text=NO_GUIDANCE)
+    return format_results(pd.concat(frames).drop_duplicates(subset="value"))
 
 
 def retrieve_context(query: str, top_k: int | None = None) -> str:
