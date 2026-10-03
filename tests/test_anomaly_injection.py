@@ -115,12 +115,12 @@ def test_agent_keywords_multiple_anomalies():
 
 
 # ---------------------------------------------------------------------------
-# Agent path — _execute_tool() query augmentation
+# Agent path — _execute_tool() leaves search queries alone
 # ---------------------------------------------------------------------------
 
 
-def test_execute_tool_augments_search_query():
-    """_execute_tool() must append anomaly keywords to RAG search queries."""
+def test_execute_tool_sends_the_models_query_unchanged():
+    """Anomalies are searched before the answer; a tool query isn't padded with them."""
 
     agent = _make_agent(_make_features(max_ascend_speed=15.0))
 
@@ -140,11 +140,10 @@ def test_execute_tool_augments_search_query():
     ):
         agent._execute_tool(fake_fc)
 
-    assert "buoyancy control" in captured_args["query"]
-    assert "rapid ascent decompression sickness" in captured_args["query"]
+    assert captured_args["query"] == "buoyancy control"
 
 
-def test_execute_tool_no_augmentation_without_anomalies():
+def test_execute_tool_query_unchanged_for_clean_profile():
     """With a clean dive profile, the query must pass through unchanged."""
 
     agent = _make_agent(

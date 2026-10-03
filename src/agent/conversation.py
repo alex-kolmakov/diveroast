@@ -282,14 +282,9 @@ class DiverRoastAgent:
                 args["dive_data"] = self.dive_data
                 args["features"] = self.features
 
-            # Augment RAG queries with objective anomaly keywords so the diver's
-            # actual safety issues surface even when their question is generic.
-            if func_name in ("search_dan_incidents", "search_dan_guidelines"):
-                anomaly_keywords = self._build_anomaly_keywords()
-                if anomaly_keywords:
-                    args["query"] = (
-                        f"{args.get('query', '')} {anomaly_keywords}".strip()
-                    )
+            # Search queries go out as the model wrote them. The log's
+            # anomalies are searched separately before every answer
+            # (_prior_search); appended here they swamped the model's query.
 
             func = TOOL_FUNCTIONS.get(func_name)
             if func is None:
