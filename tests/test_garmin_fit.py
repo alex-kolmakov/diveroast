@@ -51,6 +51,11 @@ def test_real_descent_mk2_dive():
     assert features["min_ndl"] != features["min_ndl"]  # NaN
     assert features["sac_rate"] != features["sac_rate"]
     assert not features["entered_deco"]
+    # 2.6 m is too shallow to time an ascent: not measurable, not a perfect 0.
+    assert features["max_ascend_speed"] != features["max_ascend_speed"]
+    assert features["max_shallow_ascend_speed"] != features["max_shallow_ascend_speed"]
+    assert features["high_ascend_speed_count"] == 0
+    assert features["shallow_bolt_count"] == 0
 
 
 # --- Field mapping (synthetic messages) --------------------------------------
@@ -180,6 +185,25 @@ async def test_upload_fit_file():
         )
     assert resp.status_code == 200
     assert resp.json()["dive_numbers"] == ["529"]
+
+
+async def test_unmeasurable_ascent_is_null_on_the_dashboard():
+    """The shallow FIT dive has no ascent rates: null in the JSON, never NaN or 0."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        sid = (
+            await client.post(
+                "/api/upload",
+                files={"file": ("dive.fit", Path(FIT).read_bytes())},
+            )
+        ).json()["session_id"]
+        resp = await client.get(f"/api/dashboard/{sid}")
+    assert resp.status_code == 200 and "NaN" not in resp.text
+    dive = resp.json()["all_dives"][0]
+    assert dive["max_ascend_speed"] is None
+    assert dive["max_shallow_ascend_speed"] is None
+    assert resp.json()["aggregate_stats"]["avg_max_ascend_speed"] is None
 
 
 async def test_upload_rejects_freedive_with_reason():

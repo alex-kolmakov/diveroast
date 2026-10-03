@@ -86,8 +86,13 @@ def _surfacings(
 
 
 def _surfacing_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
-    """Approach speed (m/min) of each arrival at the surface."""
-    return np.array([rate for rate, _, _ in _surfacings(times, depths)], dtype=float)
+    """Approach speed (m/min) of each arrival at the surface that could be timed.
+
+    An arrival from shallower than the lowest mark has nothing to time it
+    from and is left out.
+    """
+    rates = [rate for rate, _, _ in _surfacings(times, depths) if rate > 0]
+    return np.array(rates, dtype=float)
 
 
 def ascent_events(times: np.ndarray, depths: np.ndarray) -> list[dict]:
@@ -128,9 +133,9 @@ def ascent_events(times: np.ndarray, depths: np.ndarray) -> list[dict]:
 
 
 def _peak_and_episodes(rates: np.ndarray, limit: float) -> tuple[float, int]:
-    """Highest rate (0 if none) and the number of separate runs above limit."""
+    """Highest rate (NaN if none could be measured) and the runs above limit."""
     measured = rates[~np.isnan(rates)]
-    peak = float(max(measured.max(), 0.0)) if len(measured) else 0.0
+    peak = float(max(measured.max(), 0.0)) if len(measured) else float("nan")
     return peak, _count_events(np.nan_to_num(rates, nan=0.0) > limit)
 
 
@@ -180,7 +185,10 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     the number of surfacings faster than ``SHALLOW_ASCENT_LIMIT_M_MIN``.
 
     Counts are episodes or surfacings, not samples, so they don't scale with
-    the computer's sample rate.
+    the computer's sample rate. A rate that couldn't be measured is NaN, not
+    0: the sustained tier needs a 30 s window deeper than
+    ``SHALLOW_THRESHOLD_M``, the surfacing tier a crossing of one of
+    ``SURFACING_MARKS_M``, so a very shallow dive has neither.
     """
     data = data.sort_values(["dive_number", "time"])
     rows = []
@@ -191,7 +199,7 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
             _sustained_rates(times, depths), ASCENT_LIMIT_M_MIN
         )
         surfacings = _surfacing_rates(times, depths)
-        shallow_peak = float(surfacings.max()) if len(surfacings) else 0.0
+        shallow_peak = float(surfacings.max()) if len(surfacings) else float("nan")
         shallow_n = int((surfacings > SHALLOW_ASCENT_LIMIT_M_MIN).sum())
         rows.append(
             {

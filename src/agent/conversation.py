@@ -81,9 +81,11 @@ def _dive_line(row) -> str:
 
     parts = [
         f"depth {row['max_depth']:.1f}m",
-        f"ascent {row['max_ascend_speed']:.1f}m/min",
-        f"surfacing {row['max_shallow_ascend_speed']:.1f}m/min",
     ]
+    if measured(row.get("max_ascend_speed")):
+        parts.append(f"ascent {row['max_ascend_speed']:.1f}m/min")
+    if measured(row.get("max_shallow_ascend_speed")):
+        parts.append(f"surfacing {row['max_shallow_ascend_speed']:.1f}m/min")
     if row.get("entered_deco"):
         parts.append("ENTERED DECO")
     if measured(row.get("min_ndl")):
@@ -169,8 +171,8 @@ class DiverRoastAgent:
             f"deepest {features_df['max_depth'].max():.1f}m, "
             f"avg SAC {fmt(sac.mean(), unit=' L/min')}, "
             f"worst SAC {fmt(sac.max(), unit=' L/min')}, "
-            f"avg max ascent {features_df['max_ascend_speed'].mean():.1f} m/min, "
-            f"fastest ascent {features_df['max_ascend_speed'].max():.1f} m/min "
+            f"avg max ascent {fmt(features_df['max_ascend_speed'].mean(), unit=' m/min')}, "
+            f"fastest ascent {fmt(features_df['max_ascend_speed'].max(), unit=' m/min')} "
             f"(30 s sustained), "
             f"{int((features_df['max_shallow_ascend_speed'] > 10).sum())} dives bolted "
             f"to the surface (>10 m/min through the last 8 m), "
@@ -201,7 +203,8 @@ class DiverRoastAgent:
             f"metrics for every dive. Do NOT ask the user to upload — it's already done. "
             f"When referencing dives, always use the site name, not just the number. "
             f"A metric missing from a dive's line was not recorded by the dive computer: "
-            f"say so, never estimate it. 'ascent' is the fastest 30-second sustained "
+            f"say so, never estimate it (ascent rates can't be measured on a dive "
+            f"that stays in the top few metres). 'ascent' is the fastest 30-second sustained "
             f"ascent rate; 'surfacing' is the fastest approach to the surface through "
             f"the last 8 m, where the pressure change is largest. Both limits are "
             f"10 m/min.\n\n"

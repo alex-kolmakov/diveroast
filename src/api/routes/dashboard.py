@@ -300,8 +300,10 @@ def _generate_dive_summaries(
             f"  Picked for: {d['pick_reason']}\n"
             f"  Issues: {', '.join(d['issues'])}\n"
             f"  Stats: max_depth={d['stats']['max_depth']:.1f}m, "
-            f"max_ascent={d['stats']['max_ascend_speed']:.1f} m/min (30 s average), "
-            f"fastest_surfacing={d['stats']['max_shallow_ascend_speed']:.1f} m/min "
+            f"max_ascent={fmt(d['stats'].get('max_ascend_speed'), unit=' m/min')} "
+            f"(30 s average), "
+            f"fastest_surfacing="
+            f"{fmt(d['stats'].get('max_shallow_ascend_speed'), unit=' m/min')} "
             f"(through the last 8 m), "
             f"entered_deco={'yes' if d['stats'].get('entered_deco') else 'no'}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
@@ -507,11 +509,9 @@ async def get_dashboard(
                 min_ndl=_r(row["min_ndl"]),
                 entered_deco=bool(row["entered_deco"]),
                 sac_rate=_r(row["sac_rate"]),
-                max_ascend_speed=round(float(row["max_ascend_speed"]), 2),
+                max_ascend_speed=_r(row["max_ascend_speed"]),
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),
-                max_shallow_ascend_speed=round(
-                    float(row["max_shallow_ascend_speed"]), 2
-                ),
+                max_shallow_ascend_speed=_r(row["max_shallow_ascend_speed"]),
                 shallow_bolt_count=int(row["shallow_bolt_count"]),
                 dive_site_name=str(row.get("dive_site_name", "N/A")),
                 trip_name=str(row.get("trip_name", "N/A")),
@@ -528,7 +528,7 @@ async def get_dashboard(
         total_dives=len(features_df),
         avg_max_depth=round(float(features_df["max_depth"].mean()), 2),
         avg_sac_rate=_r(features_df["sac_rate"].mean()),
-        avg_max_ascend_speed=round(float(features_df["max_ascend_speed"].mean()), 2),
+        avg_max_ascend_speed=_r(features_df["max_ascend_speed"].mean()),
         dives_with_fast_ascent=int((features_df["max_ascend_speed"] > 10).sum()),
         dives_with_shallow_bolt=int(
             (features_df["max_shallow_ascend_speed"] > 10).sum()

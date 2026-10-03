@@ -43,9 +43,9 @@ export interface DiveFeature {
   min_ndl: number | null;
   entered_deco: boolean;
   sac_rate: number | null;
-  max_ascend_speed: number;
+  max_ascend_speed: number | null; // null: too shallow to measure
   high_ascend_speed_count: number;
-  max_shallow_ascend_speed?: number; // fastest surfacing through the last 8 m
+  max_shallow_ascend_speed?: number | null; // fastest surfacing through the last 8 m
   shallow_bolt_count?: number;
   dive_site_name: string;
   trip_name: string;
@@ -87,7 +87,7 @@ export interface AggregateStats {
   total_dives: number;
   avg_max_depth: number;
   avg_sac_rate: number | null;
-  avg_max_ascend_speed: number;
+  avg_max_ascend_speed: number | null;
   dives_with_fast_ascent?: number | null; // absent in older shared snapshots
   dives_with_shallow_bolt?: number | null;
   data_coverage?: Record<string, number>;

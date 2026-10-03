@@ -240,7 +240,9 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
             </div>
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">
-              Nothing flagged: sustained ascent and every surfacing stayed at or under 10 m/min, and no other limit was crossed.
+              {features.max_ascend_speed == null && features.max_shallow_ascend_speed == null
+                ? "Nothing flagged. Ascent rates can't be measured on a dive this shallow."
+                : "Nothing flagged: sustained ascent and every surfacing stayed at or under 10 m/min, and no other limit was crossed."}
             </p>
           )}
         </CardContent>
