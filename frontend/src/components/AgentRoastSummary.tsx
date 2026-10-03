@@ -33,7 +33,7 @@ export function AgentRoastSummary({ messages = [], isLoading = false, staticText
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Waiting for the agent to roast your dives...
+            Waiting for the agent&apos;s roast...
           </p>
         )}
       </CardContent>

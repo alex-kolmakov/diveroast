@@ -27,7 +27,7 @@ export function DashboardHeader({ stats, onToggleChat, shareUrl, readOnly }: Pro
         <Waves className="h-7 w-7 text-primary" />
         <h1 className="text-2xl font-bold tracking-tight">DiveRoast</h1>
         <Badge variant="secondary" className="text-sm">
-          {stats.total_dives} dives
+          {stats.total_dives} {stats.total_dives === 1 ? "dive" : "dives"}
         </Badge>
         {readOnly && (
           <Badge variant="outline" className="text-xs text-muted-foreground">

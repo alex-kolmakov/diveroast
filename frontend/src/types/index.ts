@@ -100,6 +100,28 @@ export interface DiverProfile {
   temp_exposure: Record<string, number>;
 }
 
+export interface ProfilePoint {
+  time_s: number;
+  depth: number;
+  temperature: number | null;
+}
+
+export interface AscentEvent {
+  kind: "sustained" | "surfacing" | string;
+  start_s: number;
+  end_s: number;
+  rate: number; // m/min
+}
+
+/** Detail for a one-dive upload (e.g. a Garmin FIT file). */
+export interface SingleDive {
+  dive_number: string;
+  duration_min: number;
+  profile: ProfilePoint[];
+  ascent_events: AscentEvent[];
+  issues: string[];
+}
+
 export interface DashboardData {
   session_id: string | null; // private; null in shared snapshots
   share_id?: string | null; // public, read-only
@@ -110,4 +132,6 @@ export interface DashboardData {
   diver_profile: DiverProfile;
   roast_summary?: string | null;
   roast_prompt?: string | null;
+  mode?: "single" | "log"; // absent in older shared snapshots = "log"
+  single_dive?: SingleDive | null;
 }

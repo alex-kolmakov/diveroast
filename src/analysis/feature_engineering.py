@@ -55,31 +55,76 @@ def _crossing_time(
     return float(times[j] + (d0 - level) / (d0 - d1) * (times[j + 1] - times[j]))
 
 
-def _surfacing_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
-    """Approach speed (m/min) of each arrival at the surface.
+def _surfacings(
+    times: np.ndarray, depths: np.ndarray
+) -> list[tuple[float, float, float]]:
+    """(speed m/min, start s, end s) of each arrival at the surface.
 
     For every arrival shallower than ``SURFACE_M``, time the ascent from the
     last crossing of each mark in ``SURFACING_MARKS_M`` to the surface and
-    keep the fastest. Crossing times are interpolated between samples, so the
-    result doesn't depend on the sample interval. Lingering shallow before
-    surfacing makes the approach slow, not fast, so reef swimming in the top
-    few metres isn't mistaken for a bolt.
+    keep the fastest; start is when that mark was crossed. Crossing times are
+    interpolated between samples, so the result doesn't depend on the sample
+    interval. Lingering shallow before surfacing makes the approach slow, not
+    fast, so reef swimming in the top few metres isn't mistaken for a bolt.
     """
     at_surface = depths < SURFACE_M
     arrivals = np.nonzero(at_surface[1:] & ~at_surface[:-1])[0] + 1
-    rates = []
+    result = []
     for i in arrivals:
         surfaced_at = _crossing_time(times, depths, i - 1, SURFACE_M)
-        fastest = 0.0
+        fastest, started = 0.0, surfaced_at
         for mark in SURFACING_MARKS_M:
             deeper = np.nonzero(depths[:i] >= mark)[0]
             if not len(deeper):
                 continue
-            elapsed = surfaced_at - _crossing_time(times, depths, deeper[-1], mark)
-            if elapsed > 0:
-                fastest = max(fastest, (mark - SURFACE_M) / elapsed * 60)
-        rates.append(fastest)
-    return np.array(rates, dtype=float)
+            crossed = _crossing_time(times, depths, deeper[-1], mark)
+            elapsed = surfaced_at - crossed
+            if elapsed > 0 and (mark - SURFACE_M) / elapsed * 60 > fastest:
+                fastest, started = (mark - SURFACE_M) / elapsed * 60, crossed
+        result.append((fastest, started, surfaced_at))
+    return result
+
+
+def _surfacing_rates(times: np.ndarray, depths: np.ndarray) -> np.ndarray:
+    """Approach speed (m/min) of each arrival at the surface."""
+    return np.array([rate for rate, _, _ in _surfacings(times, depths)], dtype=float)
+
+
+def ascent_events(times: np.ndarray, depths: np.ndarray) -> list[dict]:
+    """Where on one dive's profile each fast ascent happened.
+
+    Returns dicts with ``kind`` ("sustained" or "surfacing"), ``start`` and
+    ``end`` (s) and the peak ``rate`` (m/min). A sustained event spans its
+    over-limit run plus the averaging window that led into it.
+    """
+    order = np.argsort(times)
+    times, depths = times[order], depths[order]
+    events = []
+    rates = _sustained_rates(times, depths)
+    over = np.nan_to_num(rates, nan=0.0) > ASCENT_LIMIT_M_MIN
+    i = 0
+    while i < len(over):
+        if not over[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(over) and over[j + 1]:
+            j += 1
+        events.append(
+            {
+                "kind": "sustained",
+                "start": float(max(times[i] - ASCENT_WINDOW_S, times[0])),
+                "end": float(times[j]),
+                "rate": float(np.nanmax(rates[i : j + 1])),
+            }
+        )
+        i = j + 1
+    for rate, start, end in _surfacings(times, depths):
+        if rate > SHALLOW_ASCENT_LIMIT_M_MIN:
+            events.append(
+                {"kind": "surfacing", "start": start, "end": end, "rate": rate}
+            )
+    return sorted(events, key=lambda e: e["start"])
 
 
 def _peak_and_episodes(rates: np.ndarray, limit: float) -> tuple[float, int]:

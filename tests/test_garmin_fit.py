@@ -191,3 +191,46 @@ async def test_upload_rejects_freedive_with_reason():
         )
     assert resp.status_code == 400
     assert "Failed to parse file" in resp.json()["detail"]
+
+
+# --- Single-dive mode -------------------------------------------------------
+
+
+async def test_single_dive_upload_gets_single_mode(monkeypatch):
+    """A one-dive log returns the dive detail and makes no LLM summary call."""
+    import src.api.routes.dashboard as dashboard
+
+    def no_llm(_):
+        raise AssertionError("single-dive mode must not call Gemini for summaries")
+
+    monkeypatch.setattr(dashboard, "_generate_dive_summaries", no_llm)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        sid = (
+            await client.post(
+                "/api/upload", files={"file": ("dive.fit", Path(FIT).read_bytes())}
+            )
+        ).json()["session_id"]
+        data = (await client.get(f"/api/dashboard/{sid}")).json()
+    assert data["mode"] == "single"
+    assert data["top_problematic_dives"] == []
+    single = data["single_dive"]
+    assert single["dive_number"] == "529"
+    assert len(single["profile"]) == 154
+    assert single["duration_min"] > 0
+
+
+def test_single_dive_profile_is_downsampled_and_ends_at_surface():
+    from src.api.routes.dashboard import MAX_PROFILE_POINTS, _build_single_dive
+
+    msgs = _messages(
+        records=[
+            {"timestamp": T0 + timedelta(seconds=s), "depth": min(s / 60, 20.0)}
+            for s in range(0, 3001)
+        ]
+    )
+    df = messages_to_frame(msgs)
+    single = _build_single_dive(df, extract_features(df).iloc[0])
+    assert len(single.profile) <= MAX_PROFILE_POINTS + 1
+    assert single.profile[-1].time_s == 3000

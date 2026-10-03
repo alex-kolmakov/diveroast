@@ -105,6 +105,31 @@ class DiverProfile(BaseModel):
     ]  # e.g. {"Tropical (>24°C)": 45, "Temperate (15-24°C)": 12}
 
 
+class ProfilePoint(BaseModel):
+    time_s: float
+    depth: float
+    temperature: float | None = None
+
+
+class AscentEvent(BaseModel):
+    """A fast ascent on the profile: sustained (30 s) or a bolt to the surface."""
+
+    kind: str  # "sustained" | "surfacing"
+    start_s: float
+    end_s: float
+    rate: float  # m/min
+
+
+class SingleDive(BaseModel):
+    """Detail for single-dive mode (a log with exactly one dive)."""
+
+    dive_number: str
+    duration_min: float
+    profile: list[ProfilePoint]  # downsampled for plotting
+    ascent_events: list[AscentEvent]
+    issues: list[str]  # the same issue sentences the agent sees
+
+
 class DashboardResponse(BaseModel):
     # Private session ID: present for the owner, stripped from shared snapshots.
     session_id: str | None = None
@@ -117,3 +142,7 @@ class DashboardResponse(BaseModel):
     diver_profile: DiverProfile
     roast_summary: str | None = None
     roast_prompt: str | None = None  # which system prompt wrote the roast
+    # "single": one dive (e.g. a Garmin FIT file) -> dive detail, not a log
+    # overview. Defaults keep pre-P1 snapshots loadable.
+    mode: str = "log"
+    single_dive: SingleDive | None = None

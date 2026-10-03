@@ -5,6 +5,12 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { RangeGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
+import { lazy, Suspense } from "react";
+
+// Loaded on demand: it pulls in the charting library, which log mode never needs.
+const SingleDiveView = lazy(() =>
+  import("@/components/SingleDiveView").then((m) => ({ default: m.SingleDiveView }))
+);
 import type { ChatMessage, DashboardData } from "@/types";
 
 // Temperature labels that belong in the dedicated temp section, not Water Types
@@ -31,6 +37,7 @@ const STAT_ICONS = [
 ];
 
 export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
+  const single = data.mode === "single" && data.single_dive && data.all_dives.length === 1;
   const statValues = [
     data.aggregate_stats.avg_max_depth.toFixed(1),
     data.aggregate_stats.avg_sac_rate != null
@@ -63,6 +70,19 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
 
         <Separator />
 
+        {single ? (
+          <>
+            <Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-muted/30" />}>
+              <SingleDiveView dive={data.single_dive!} features={data.all_dives[0]} />
+            </Suspense>
+            <AgentRoastSummary
+              messages={messages}
+              isLoading={isLoading}
+              staticText={readOnly ? data.roast_summary : undefined}
+            />
+          </>
+        ) : (
+        <>
         {/* Aggregate stats */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {STAT_ICONS.map(({ icon: Icon, label, suffix }, i) => (
@@ -182,6 +202,8 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
               ))}
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

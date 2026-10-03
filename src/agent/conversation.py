@@ -135,8 +135,16 @@ class DiverRoastAgent:
         if len(dive_lines) > 200:
             dive_summary += f"\n  ... and {len(dive_lines) - 200} more dives"
 
+        scope = (
+            "This upload is a SINGLE dive (for example one Garmin FIT file). "
+            "Evaluate this dive on its own: its profile, ascents, NDL and gas. "
+            "Don't talk about habits or patterns across a log. "
+            if len(dive_numbers) == 1
+            else ""
+        )
         context_msg = (
             f"[System: The diver has uploaded a dive log containing {len(dive_numbers)} dives. "
+            f"{scope}"
             f"Pre-computed feature summaries are below — use these to identify patterns and "
             f"dangerous dives. You can still call analyze_dive_profile or get_dive_summary "
             f"for deeper analysis of specific dives if needed, but you already have the key "

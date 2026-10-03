@@ -5,20 +5,27 @@ from typing import cast
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from src.agent.gemini_client import get_client
-from src.analysis.feature_engineering import data_coverage, extract_features
+from src.analysis.feature_engineering import (
+    ascent_events,
+    data_coverage,
+    extract_features,
+)
 from src.api.dependencies import get_session, get_snapshot_store
 from src.api.models import (
     AggregateStats,
+    AscentEvent,
     DashboardResponse,
     DiveFeature,
     DiveMetricPoint,
     DiverProfile,
     MetricRange,
     ProblematicDive,
+    ProfilePoint,
+    SingleDive,
 )
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
-from src.tools.dive import fmt, measured
+from src.tools.dive import dive_issues, fmt, measured
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -353,6 +360,43 @@ def _classify_experience(dive_count: int, max_depth: float) -> str:
     return "beginner"
 
 
+MAX_PROFILE_POINTS = 600
+
+
+def _build_single_dive(dive_data, row) -> SingleDive:
+    """Profile, fast-ascent events and issues for a one-dive log."""
+    dive = dive_data.sort_values("time")
+    times = dive["time"].to_numpy(dtype=float)
+    depths = dive["depth"].to_numpy(dtype=float)
+    step = max(1, len(dive) // MAX_PROFILE_POINTS)
+    keep = list(range(0, len(dive), step))
+    if keep[-1] != len(dive) - 1:
+        keep.append(len(dive) - 1)  # always end at the surfacing
+    sampled = dive.iloc[keep]
+    return SingleDive(
+        dive_number=str(row["dive_number"]),
+        duration_min=round(float(times[-1] - times[0]) / 60, 1),
+        profile=[
+            ProfilePoint(
+                time_s=float(p["time"]),
+                depth=round(float(p["depth"]), 2),
+                temperature=_r(p.get("temperature"), 1),
+            )
+            for _, p in sampled.iterrows()
+        ],
+        ascent_events=[
+            AscentEvent(
+                kind=e["kind"],
+                start_s=round(e["start"], 1),
+                end_s=round(e["end"], 1),
+                rate=round(e["rate"], 1),
+            )
+            for e in ascent_events(times, depths)
+        ],
+        issues=dive_issues(row),
+    )
+
+
 def _build_diver_profile(features_df) -> DiverProfile:
     """Build a diver profile from aggregated dive features."""
     water_types = set()
@@ -486,6 +530,10 @@ async def get_dashboard(
         data_coverage=data_coverage(features_df),
     )
 
+    # One dive (e.g. a Garmin FIT file): show that dive in detail instead of
+    # ranking "worst dives", and skip the Gemini call for their summaries.
+    single = len(features_df) == 1
+
     # Compute danger scores for all dives
     scored_dives = []
     for _, row in features_df.iterrows():
@@ -542,6 +590,8 @@ async def get_dashboard(
 
     # Sort picks by danger score
     picks.sort(key=lambda x: x[1], reverse=True)
+    if single:
+        picks = []
 
     # Generate LLM summaries for all picks in one call
     llm_inputs = []
@@ -586,6 +636,10 @@ async def get_dashboard(
         diver_profile=diver_profile,
         roast_summary=agent.roast_summary,
         roast_prompt=agent.roast_prompt,
+        mode="single" if single else "log",
+        single_dive=_build_single_dive(agent.dive_data, features_df.iloc[0])
+        if single
+        else None,
     )
     agent.dashboard = response
 

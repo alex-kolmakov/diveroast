@@ -79,9 +79,11 @@ function App() {
     if (phase !== "dashboard" || !sessionId || sharedId || roastFired.current) return;
     roastFired.current = true;
     sendMessage(
-      "Analyze all my dives and give me a brutally honest roast. Highlight the most dangerous moments and tell me what I need to fix."
+      dashboardData?.mode === "single"
+        ? "Analyze this dive and give me a brutally honest roast. Walk through the profile, point out the most dangerous moments and tell me what I need to fix."
+        : "Analyze all my dives and give me a brutally honest roast. Highlight the most dangerous moments and tell me what I need to fix."
     );
-  }, [phase, sessionId, sharedId, sendMessage]);
+  }, [phase, sessionId, sharedId, sendMessage, dashboardData?.mode]);
 
   // The server saves the roast into the shared snapshot itself.
 
