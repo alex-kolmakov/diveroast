@@ -1,4 +1,5 @@
 import contextlib
+import html
 import logging
 import re
 from typing import Any
@@ -158,7 +159,8 @@ def dan_articles(article):
     import hashlib
 
     global _chunk_count
-    title = article.get("title", {}).get("rendered", "unknown")
+    # WordPress renders titles as HTML ("Can&#8217;t"); citations need text.
+    title = html.unescape(article.get("title", {}).get("rendered", "unknown"))
     clean_content = remove_html_tags(article["content"]["rendered"])
     chunks = chunk_text(clean_content)
     _chunk_count += len(chunks)

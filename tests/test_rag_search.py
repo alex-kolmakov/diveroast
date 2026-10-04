@@ -128,3 +128,16 @@ def test_describe_features_leaves_out_unrecorded_metrics():
     assert "10.0 m" in text
     assert "NDL" not in text
     assert "SAC" not in text
+
+
+def test_titles_are_stored_as_text_not_html():
+    """81 titles were stored like "If You Can&#8217;t Equalize"."""
+    from src.rag.ingestion import dan_articles
+
+    article = {
+        "title": {"rendered": "If You Can&#8217;t Equalize &amp; Descend"},
+        "content": {"rendered": "<p>Some guidance about equalizing.</p>"},
+        "link": "https://dan.org/x/",
+    }
+    rows = list(dan_articles.__wrapped__(article))  # the plain generator
+    assert rows[0]["title"] == "If You Can’t Equalize & Descend"
