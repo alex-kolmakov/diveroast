@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     # states these numbers.
     DONATION_RETENTION_DAYS: int = 365
     SNAPSHOT_RETENTION_DAYS: int = 365  # shared links
+    SNAPSHOTS_MAX_TOTAL_MB: int = 1024  # oldest links go first above this
 
     # Admin
     ADMIN_SECRET: str = ""  # Set in .env / Secret Manager to protect admin endpoints

@@ -607,3 +607,20 @@ def test_operational_alerts_reach_sentry(sentry_events, monkeypatch, tmp_path):
     }
     assert "Daily token budget spent; roasts paused until midnight UTC" in messages
     assert "Donation storage full; new donations are refused" in messages
+
+
+async def test_shared_links_stay_under_the_size_cap(tmp_path):
+    import os
+
+    from src.api.models import DashboardResponse
+    from src.storage.snapshots import LocalSnapshotStore
+
+    store = LocalSnapshotStore(str(tmp_path), max_total_bytes=2500)
+    for i, name in enumerate(["a", "b", "c"]):
+        (tmp_path / f"{name}.json").write_text("x" * 1000)
+        os.utime(tmp_path / f"{name}.json", (1000 + i, 1000 + i))
+    data = DashboardResponse.model_construct()
+    with patch.object(DashboardResponse, "model_dump_json", return_value="y" * 1000):
+        await store.save("new", data)
+    left = sorted(p.name for p in tmp_path.iterdir())
+    assert left == ["c.json", "new.json"]  # oldest went first; the new link stays

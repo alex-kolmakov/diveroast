@@ -68,7 +68,9 @@ def get_snapshot_store() -> SnapshotStore:
     """Return the singleton snapshot store (local filesystem, backed by Docker volume in prod)."""
     global _snapshot_store
     if _snapshot_store is None:
-        _snapshot_store = LocalSnapshotStore(settings.SNAPSHOT_DIR)
+        _snapshot_store = LocalSnapshotStore(
+            settings.SNAPSHOT_DIR, settings.SNAPSHOTS_MAX_TOTAL_MB * 1024 * 1024
+        )
     return _snapshot_store
 
 
