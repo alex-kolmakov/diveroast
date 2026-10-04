@@ -295,3 +295,44 @@ def test_bad_ids_never_touch_other_files(tmp_path):
     assert not store.delete("../keep")
     assert not store.delete_with_code("*.x")
     assert (tmp_path / "keep.json").exists()
+
+
+@pytest.mark.anyio
+async def test_roast_is_added_to_the_donation_record(donations_dir):
+    import json
+    from unittest.mock import MagicMock, patch
+
+    import src.api.dependencies as deps
+
+    result = await _upload(UDDF_WITH_PEOPLE, "log.uddf", **_donate())
+    donation_id = result["donation"]["id"]
+    agent = deps.get_session(result["session_id"])
+    assert agent is not None and agent.donation_id == donation_id
+
+    prompt = MagicMock(prompt="p", label="test", version=5, phoenix_version_id=None)
+
+    def answer(message, prompt_ver):
+        agent.last_prompt = "test (v5)"
+        return "Blue Hole at 12 m and you bolted."
+
+    with (
+        patch.object(agent, "_run_turn", side_effect=answer),
+        patch("src.agent.conversation.get_active_prompt", return_value=prompt),
+    ):
+        body = {"message": "roast me", "session_id": result["session_id"]}
+        await _post("/api/chat", json=body)
+        await _post("/api/chat", json={**body, "message": "and again?"})
+
+    record = json.loads((donations_dir / f"{donation_id}.json").read_text())
+    assert record["roast"]["text"] == "Blue Hole at 12 m and you bolted."
+    assert record["roast"]["prompt"] == "test (v5)"
+    assert record["roast"]["model"]
+
+
+@pytest.mark.anyio
+async def test_undonated_upload_has_no_donation_link(donations_dir):
+    import src.api.dependencies as deps
+
+    result = await _upload(UDDF_WITH_PEOPLE, "log.uddf")
+    agent = deps.get_session(result["session_id"])
+    assert agent is not None and agent.donation_id is None

@@ -107,6 +107,15 @@ class DonationStore:
             path.unlink(missing_ok=True)
         logger.info("Donation %s deleted", donation_id)
 
+    def attach_roast(self, donation_id: str, roast: dict[str, Any]) -> None:
+        """Keep the roast this log got, so the donation can become an eval case."""
+        with self._lock:
+            record = self._load(donation_id)
+            if record is None:  # deleted in the meantime
+                return
+            record["roast"] = roast
+            self._write(record)
+
     def delete_with_code(self, code: str) -> bool:
         """Delete by the donor's code; False if it matches nothing."""
         donation_id, _, token = code.strip().partition(".")

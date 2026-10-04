@@ -96,6 +96,9 @@ async def upload_dive_log(
         donation = await asyncio.to_thread(
             _store_donation, content, filename, len(dive_numbers), consent_version
         )
+    agent.donation_id = (
+        donation.id if donation is not None and donation.status == "stored" else None
+    )
 
     return UploadResponse(
         session_id=sid,

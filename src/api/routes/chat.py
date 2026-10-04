@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -7,9 +9,11 @@ from sse_starlette.sse import EventSourceResponse
 from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import ModelBusyError
 from src.agent.usage import daily_budget
-from src.api.dependencies import get_session, get_snapshot_store
+from src.api.dependencies import get_donation_store, get_session, get_snapshot_store
 from src.api.limits import limit_chats
 from src.api.models import ChatRequest, Source
+from src.config import settings
+from src.storage.donations import DonationStore
 from src.storage.snapshots import SnapshotStore
 
 router = APIRouter()
@@ -32,7 +36,11 @@ def _mark_cited(sources: list[dict[str, str]], text: str) -> list[dict]:
 
 
 async def _record_roast(
-    agent: DiverRoastAgent, text: str, sources: list[dict], store: SnapshotStore
+    agent: DiverRoastAgent,
+    text: str,
+    sources: list[dict],
+    store: SnapshotStore,
+    donations: DonationStore,
 ) -> None:
     """Keep the first answer after an upload as the log's roast.
 
@@ -44,6 +52,17 @@ async def _record_roast(
     agent.roast_summary = text
     agent.roast_prompt = agent.last_prompt
     agent.roast_sources = sources
+    if agent.donation_id:
+        roast = {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "prompt": agent.roast_prompt,
+            "model": settings.LLM_MODEL
+            if settings.LLM_BASE_URL
+            else settings.GEMINI_MODEL,
+            "text": text,
+            "sources": sources,
+        }
+        await asyncio.to_thread(donations.attach_roast, agent.donation_id, roast)
     if agent.dashboard is not None:
         agent.dashboard = agent.dashboard.model_copy(
             update={
@@ -61,6 +80,7 @@ async def _record_roast(
 async def chat(
     request: ChatRequest,
     store: SnapshotStore = Depends(get_snapshot_store),
+    donations: DonationStore = Depends(get_donation_store),
 ):
     """Send a message and receive a streaming SSE response.
 
@@ -99,7 +119,7 @@ async def chat(
             sources = _mark_cited(agent.last_sources, text)
             if sources:
                 yield {"event": "sources", "data": json.dumps({"sources": sources})}
-            await _record_roast(agent, text, sources, store)
+            await _record_roast(agent, text, sources, store, donations)
             yield {"event": "done", "data": json.dumps({"status": "complete"})}
         except ModelBusyError:
             logger.warning("Chat turn gave up: model busy after retries")

@@ -133,6 +133,8 @@ class DiverRoastAgent:
         # Budget counters for the whole session (see over_budget).
         self.messages_sent = 0
         self.tokens_used = 0
+        # Set when this log was donated: its roast is added to the record.
+        self.donation_id: str | None = None
 
     @property
     def client(self):
