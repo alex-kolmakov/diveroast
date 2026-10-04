@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Bump whenever the donation wording on the upload screen or the privacy
 # page changes; the frontend sends the version it showed.
-CONSENT_VERSION = "2026-10-04.2"
+CONSENT_VERSION = "2026-10-04.3"
 
 _ID = re.compile(r"^[0-9a-f]{16}$")
 

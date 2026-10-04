@@ -106,18 +106,13 @@ export function UploadScreen({ onUploadComplete }: Props) {
             Donate my dive log to help improve DiveRoast
           </span>
           <span className="block text-xs leading-relaxed">
-            Removed first: buddy and divemaster names, notes, device serial numbers and
-            body data.
-          </span>
-          <span className="block text-xs leading-relaxed">
-            Kept for {RETENTION_DAYS} days: dive profiles, dates, site names and GPS
-            positions. You get a code to delete it sooner.{" "}
+            Names and notes are removed first; kept {RETENTION_DAYS} days.{" "}
             <a
               href="/privacy"
               onClick={(e) => e.stopPropagation()}
               className="text-primary underline underline-offset-2"
             >
-              Privacy
+              What's kept
             </a>
           </span>
         </span>
