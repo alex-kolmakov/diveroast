@@ -58,6 +58,11 @@ NO_DAN_MATERIAL_NOTE = (
 
 # "([DAN: Title](url))", with or without the outer parentheses
 _DAN_LINK = re.compile(r"\s*\(?\[DAN: ([^\]]+)\]\(([^)\s]+)\)\)?")
+# Any other markdown link to dan.org: "[Ascent Rates](url)", or a site name
+# the model turned into a link, "[Seven sisters](https://dan.org/...)".
+_OTHER_DAN_LINK = re.compile(
+    r"(\()?\[(?!DAN: )([^\]]+)\]\((https?://(?:www\.)?dan\.org[^)\s]*)\)(\))?"
+)
 
 
 def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
@@ -77,7 +82,16 @@ def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
             return ""
         return f" ([DAN: {source['title']}]({source['url']}))"
 
-    return _DAN_LINK.sub(fix, text)
+    def fix_other(match: re.Match) -> str:
+        """A link named after a retrieved article becomes a citation; any
+        other text linked to DAN (a site name, a phrase) loses the link."""
+        opened, label, closed = match.group(1), match.group(2), match.group(4)
+        source = by_title.get(label.strip().lower())
+        if source is None:
+            return f"{opened or ''}{label}{closed or ''}"
+        return f"([DAN: {source['title']}]({source['url']}))"
+
+    return _DAN_LINK.sub(fix, _OTHER_DAN_LINK.sub(fix_other, text))
 
 
 def _hit_output_cap(response: types.GenerateContentResponse) -> bool:

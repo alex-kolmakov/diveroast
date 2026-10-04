@@ -123,3 +123,52 @@ def test_agent_replaces_a_fully_unbacked_answer():
     agent = _agent_answering("Your 97.3 m/min ascent was wild.")
     with patch.object(agent, "_prior_search", return_value=""):
         assert agent._run_turn("roast me", _get_local_prompt()) == UNBACKED_ANSWER
+
+
+# --- DAN links the model misused --------------------------------------------
+
+
+SOURCES = [
+    {
+        "title": "Ascent Rates",
+        "url": "https://dan.org/alert-diver/article/ascent-rates/",
+    },
+    {
+        "title": "Diving with an Infectious Disease",
+        "url": "https://dan.org/infectious/",
+    },
+]
+
+
+def test_link_named_after_an_article_becomes_a_citation():
+    from src.agent.conversation import repair_dan_links
+
+    text = (
+        "Slow down ([Ascent Rates](https://dan.org/alert-diver/article/ascent-rates/))."
+    )
+    assert repair_dan_links(text, SOURCES) == (
+        "Slow down ([DAN: Ascent Rates](https://dan.org/alert-diver/article/ascent-rates/))."
+    )
+
+
+def test_site_name_linked_to_dan_loses_the_link():
+    """Seen 2026-10-04: site names linked to unrelated DAN articles."""
+    from src.agent.conversation import repair_dan_links
+
+    text = (
+        "Deco on [Seven sisters, Marker 39 (Red sea, Jun 2024)]"
+        "(https://dan.org/infectious/), nine times."
+    )
+    assert repair_dan_links(text, SOURCES) == (
+        "Deco on Seven sisters, Marker 39 (Red sea, Jun 2024), nine times."
+    )
+
+
+def test_proper_citations_and_other_links_are_untouched():
+    from src.agent.conversation import repair_dan_links
+
+    text = (
+        "Fast ([DAN: Ascent Rates](https://dan.org/alert-diver/article/ascent-rates/)); "
+        "map [here](https://www.openstreetmap.org/x)."
+    )
+    assert repair_dan_links(text, SOURCES) == text
