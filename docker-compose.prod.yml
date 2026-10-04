@@ -72,6 +72,15 @@ services:
   phoenix:
     logging: *logging
     image: arizephoenix/phoenix:version-20.16.0  # pinned; was :latest
+    environment:
+      # Traces hold every visitor's dive summary and messages: keep 30 days
+      # (Phoenix's cleanup runs weekly, so up to 37). Applies when Phoenix
+      # creates its database; change an existing one under Settings in the UI.
+      - PHOENIX_DEFAULT_RETENTION_POLICY_DAYS=30
+    volumes:
+      # Without a volume the traces lived in the container and vanished on
+      # every recreate.
+      - phoenix-data:/root/.phoenix
     container_name: diveroast-phoenix
     # Published on the VPS loopback only, NOT exposed externally. Without a
     # published port the SSH tunnel had nothing to reach. Access via:
@@ -89,3 +98,4 @@ services:
 volumes:
   diveroast-snapshots:
   diveroast-donations:
+  phoenix-data:
