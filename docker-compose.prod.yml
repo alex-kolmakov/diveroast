@@ -1,5 +1,14 @@
+# Docker keeps container logs forever by default; cap each service at
+# 5 x 20 MB so a busy day can't fill the disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   nginx:
+    logging: *logging
     image: nginx:alpine
     ports:
       - "80:80"
@@ -13,6 +22,7 @@ services:
     restart: unless-stopped
 
   backend:
+    logging: *logging
     build:
       context: .
       dockerfile: Dockerfile
@@ -45,6 +55,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    logging: *logging
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -57,6 +68,7 @@ services:
     restart: unless-stopped
 
   phoenix:
+    logging: *logging
     image: arizephoenix/phoenix:version-20.16.0  # pinned; was :latest
     container_name: diveroast-phoenix
     # Published on the VPS loopback only, NOT exposed externally. Without a
