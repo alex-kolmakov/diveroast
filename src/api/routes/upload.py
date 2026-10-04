@@ -1,7 +1,8 @@
 import asyncio
+import logging
 import os
 import tempfile
-from datetime import datetime
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -11,8 +12,27 @@ from src.api.limits import limit_uploads
 from src.api.models import UploadResponse
 from src.config import settings
 from src.parsers import get_parser
+from src.storage.sanitize import sanitize
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _store_donation(content: bytes, filename: str) -> None:
+    """Keep a donated log with people, notes and serials stripped.
+
+    The raw upload is never written. The stored name is random: the
+    original filename can carry a name.
+    """
+    try:
+        clean = sanitize(content, filename)
+    except Exception:
+        logger.warning("Donation not stored: could not sanitize", exc_info=True)
+        return
+    donations_dir = Path(settings.DONATIONS_DIR)
+    donations_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(filename).suffix.lower()
+    (donations_dir / f"{uuid.uuid4().hex}{ext}").write_bytes(clean)
 
 
 @router.post(
@@ -58,11 +78,7 @@ async def upload_dive_log(
         raise HTTPException(status_code=400, detail=f"No dives found in {filename}")
 
     if donate:
-        donations_dir = Path(settings.DONATIONS_DIR)
-        donations_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-        donation_path = donations_dir / f"{timestamp}_{filename}"
-        donation_path.write_bytes(content)
+        await asyncio.to_thread(_store_donation, content, filename)
 
     sid, agent = get_or_create_session(session_id)
     await asyncio.to_thread(agent.set_dive_data, df)
