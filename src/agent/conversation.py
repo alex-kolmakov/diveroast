@@ -73,6 +73,13 @@ def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
     return _DAN_LINK.sub(fix, text)
 
 
+def _hit_output_cap(response: types.GenerateContentResponse) -> bool:
+    candidates = response.candidates or []
+    return bool(candidates) and (
+        candidates[0].finish_reason == types.FinishReason.MAX_TOKENS
+    )
+
+
 def _dive_line(row) -> str:
     site = str(row.get("dive_site_name", "N/A"))
     trip = str(row.get("trip_name", ""))
@@ -372,6 +379,7 @@ class DiverRoastAgent:
                 temperature=settings.AGENT_TOOL_TEMPERATURE
                 if step == 0
                 else settings.AGENT_TEMPERATURE,
+                max_output_tokens=settings.CHAT_MAX_OUTPUT_TOKENS,
             )
             if out_of_steps:
                 config.tool_config = types.ToolConfig(
@@ -384,6 +392,11 @@ class DiverRoastAgent:
                 contents=self.history,
                 config=config,
             )
+            if _hit_output_cap(response):
+                logger.warning(
+                    "Answer cut at CHAT_MAX_OUTPUT_TOKENS=%d",
+                    settings.CHAT_MAX_OUTPUT_TOKENS,
+                )
 
             function_calls = self._extract_function_calls(response)
             if function_calls and not out_of_steps:

@@ -120,6 +120,8 @@ class _Models:
         if config is not None:
             if config.temperature is not None:
                 body["temperature"] = config.temperature
+            if config.max_output_tokens is not None:
+                body["max_tokens"] = config.max_output_tokens
             declarations = [
                 fd
                 for tool in config.tools or []

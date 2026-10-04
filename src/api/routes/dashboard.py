@@ -5,6 +5,7 @@ from typing import cast
 
 import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from google.genai import types
 
 from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import get_client
@@ -320,6 +321,9 @@ def _generate_dive_summaries(
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents="\n".join(prompt_parts),
+            config=types.GenerateContentConfig(
+                max_output_tokens=settings.SUMMARY_MAX_OUTPUT_TOKENS
+            ),
         )
         text = (response.text or "").strip()
         # Strip markdown code fences if present

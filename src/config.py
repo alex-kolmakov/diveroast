@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     AGENT_TOOL_TEMPERATURE: float = 0.2  # first round: picking tools
     AGENT_TEMPERATURE: float = 0.8  # later rounds: writing the answer
 
+    # Output caps per model call (thinking tokens count against them too).
+    # A roast is ~120 words; a follow-up answer a few paragraphs.
+    CHAT_MAX_OUTPUT_TOKENS: int = 2048
+    SUMMARY_MAX_OUTPUT_TOKENS: int = 1024  # the worst-dive jabs, one JSON array
+
     # Sessions (in-memory)
     SESSION_TTL_SECONDS: int = 6 * 60 * 60
     MAX_SESSIONS: int = 500
