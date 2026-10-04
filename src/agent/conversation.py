@@ -38,15 +38,14 @@ FORCE_ANSWER_NOTE = (
 PRIOR_SEARCH_TOP_K = 3
 
 DAN_MATERIAL_NOTE = (
-    "\n\n# DAN material\n"
-    "Already searched for this message. Cite it only where it backs your "
-    "point, using the source title and URL shown; a hit that doesn't fit is "
-    "not a citation.\n\n{material}"
+    "[System: DAN material. Already searched for this message. Cite it only "
+    "where it backs your point, using the source title and URL shown; a hit "
+    "that doesn't fit is not a citation.\n\n{material}]"
 )
 NO_DAN_MATERIAL_NOTE = (
-    "\n\n# DAN material\n"
-    "Already searched for this message: nothing relevant was found. Don't "
-    "cite DAN unless a search you run yourself returns something."
+    "[System: DAN material. Already searched for this message: nothing "
+    "relevant was found. Don't cite DAN unless a search you run yourself "
+    "returns something.]"
 )
 
 
@@ -269,7 +268,7 @@ class DiverRoastAgent:
         return build_anomaly_keywords(getattr(self, "features", None))
 
     def _prior_search(self, user_message: str) -> str:
-        """Search DAN before the model answers; return a system-prompt section.
+        """Search DAN before the model answers; return a note for this turn.
 
         Grounding shouldn't depend on the model choosing to call a search
         tool: cheaper models answer without one. Searches the message itself
@@ -288,6 +287,26 @@ class DiverRoastAgent:
             return NO_DAN_MATERIAL_NOTE
         self.last_sources.extend(found.sources)
         return DAN_MATERIAL_NOTE.format(material=found.text)
+
+    def _with_material(self, turn_start: int, material: str) -> list[types.Content]:
+        """The history as sent: the DAN material rides in this turn's message.
+
+        Kept out of the system prompt so everything before this message
+        (system prompt, tools, the log, earlier turns) is the same prefix on
+        every call, which Gemini's implicit cache can reuse.
+        """
+        if not material:
+            return list(self.history)
+        message = self.history[turn_start]
+        with_material = types.Content(
+            role=message.role,
+            parts=[types.Part.from_text(text=material), *(message.parts or [])],
+        )
+        return [
+            *self.history[:turn_start],
+            with_material,
+            *self.history[turn_start + 1 :],
+        ]
 
     def _execute_tool(self, function_call: types.FunctionCall) -> str:
         """Execute a tool function call and return the result text."""
@@ -364,13 +383,14 @@ class DiverRoastAgent:
         self.last_sources = []
         self.last_prompt = self._describe_prompt(prompt_ver)
         self.messages_sent += 1
-        system_instruction = prompt_ver.prompt + self._prior_search(user_message)
+        material = self._prior_search(user_message)
         self.history.append(
             types.Content(
                 role="user",
                 parts=[types.Part.from_text(text=user_message)],
             )
         )
+        turn_start = len(self.history) - 1
         tools = [types.Tool(function_declarations=TOOL_DECLARATIONS)]
 
         for step in range(settings.AGENT_MAX_STEPS + 1):
@@ -387,7 +407,7 @@ class DiverRoastAgent:
                     )
                 )
             config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
+                system_instruction=prompt_ver.prompt,
                 tools=tools,
                 temperature=settings.AGENT_TOOL_TEMPERATURE
                 if step == 0
@@ -400,7 +420,11 @@ class DiverRoastAgent:
                         mode=types.FunctionCallingConfigMode.NONE
                     )
                 )
-            response = generate(self.client, contents=self.history, config=config)
+            response = generate(
+                self.client,
+                contents=self._with_material(turn_start, material),
+                config=config,
+            )
             self.tokens_used += record_usage(response, f"chat step {step}").total
             if _hit_output_cap(response):
                 logger.warning(

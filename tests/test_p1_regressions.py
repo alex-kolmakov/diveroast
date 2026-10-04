@@ -529,8 +529,11 @@ def test_dan_is_searched_before_every_answer(sparse_df):
     queries = search.call_args.args[0]
     assert queries[0] == "and my air?"  # the message, then one query per anomaly
     assert len(queries) > 1
-    config = agent._client.models.generate_content.call_args.kwargs["config"]
-    assert "Go slow." in config.system_instruction
+    sent = agent._client.models.generate_content.call_args.kwargs
+    assert sent["config"].system_instruction == "p"  # stable, cacheable prefix
+    turn = sent["contents"][-1]  # this turn's message
+    assert "Go slow." in turn.parts[0].text
+    assert turn.parts[1].text == "and my air?"
     assert agent.last_sources == found.sources
     # The material is for the turn only: history holds the two exchanges, nothing else.
     assert len(agent.history) == history_before + 4
