@@ -1,3 +1,4 @@
+import { CONSENT_VERSION } from "@/lib/consent";
 import type { DashboardData, Source, UploadResponse } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -33,6 +34,7 @@ export async function uploadDiveLog(
   }
   if (donate) {
     formData.append("donate", "true");
+    formData.append("consent_version", CONSENT_VERSION);
   }
 
   const response = await fetch(`${API_BASE}/api/upload`, {
@@ -45,6 +47,17 @@ export async function uploadDiveLog(
   }
 
   return response.json();
+}
+
+export async function deleteDonation(code: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/donations/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "Delete failed"));
+  }
 }
 
 export function fetchDashboard(sessionId: string): Promise<DashboardData> {

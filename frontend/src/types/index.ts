@@ -10,11 +10,18 @@ export interface ChatMessage {
   sources?: Source[];
 }
 
+export interface DonationReceipt {
+  id: string;
+  deletion_code: string | null; // null when this log was already donated
+  status: "stored" | "duplicate";
+}
+
 export interface UploadResponse {
   session_id: string;
   dive_count: number;
   dive_numbers: string[];
   message: string;
+  donation?: DonationReceipt | null;
 }
 
 export interface ChatRequest {

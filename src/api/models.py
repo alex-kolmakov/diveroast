@@ -16,11 +16,24 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class DonationReceipt(BaseModel):
+    id: str
+    # Shown to the donor once; only its hash is kept. None for a duplicate
+    # of a log already donated (the first donor holds that code).
+    deletion_code: str | None
+    status: str  # "stored" | "duplicate"
+
+
 class UploadResponse(BaseModel):
     session_id: str
     dive_count: int
     dive_numbers: list[str]
     message: str
+    donation: DonationReceipt | None = None
+
+
+class DeleteDonationRequest(BaseModel):
+    code: str = Field(max_length=128)
 
 
 # --- Dashboard models ---

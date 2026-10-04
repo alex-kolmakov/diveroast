@@ -3,6 +3,7 @@ import uuid
 
 from src.agent.conversation import DiverRoastAgent
 from src.config import settings
+from src.storage.donations import DonationStore
 from src.storage.snapshots import LocalSnapshotStore, SnapshotStore
 
 # In-memory session store: {session_id: DiverRoastAgent}, with last-access
@@ -11,8 +12,9 @@ from src.storage.snapshots import LocalSnapshotStore, SnapshotStore
 _sessions: dict[str, DiverRoastAgent] = {}
 _last_seen: dict[str, float] = {}
 
-# Singleton snapshot store (lazily initialised)
+# Singleton stores (lazily initialised)
 _snapshot_store: SnapshotStore | None = None
+_donation_store: DonationStore | None = None
 
 
 def _evict(now: float) -> None:
@@ -68,3 +70,12 @@ def get_snapshot_store() -> SnapshotStore:
     if _snapshot_store is None:
         _snapshot_store = LocalSnapshotStore(settings.SNAPSHOT_DIR)
     return _snapshot_store
+
+
+def get_donation_store() -> DonationStore:
+    global _donation_store
+    if _donation_store is None:
+        _donation_store = DonationStore(
+            settings.DONATIONS_DIR, settings.DONATIONS_MAX_TOTAL_MB * 1024 * 1024
+        )
+    return _donation_store

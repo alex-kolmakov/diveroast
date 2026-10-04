@@ -5,6 +5,7 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
+import { DonationNotice } from "@/components/DonationNotice";
 import { metricKind } from "@/lib/metrics";
 import { lazy, Suspense } from "react";
 
@@ -12,7 +13,7 @@ import { lazy, Suspense } from "react";
 const SingleDiveView = lazy(() =>
   import("@/components/SingleDiveView").then((m) => ({ default: m.SingleDiveView }))
 );
-import type { ChatMessage, DashboardData, DiverProfile } from "@/types";
+import type { ChatMessage, DashboardData, DiverProfile, DonationReceipt } from "@/types";
 
 // Temperature labels that belong in the temperature gauge, not Water Types
 const TEMP_WATER_TYPES = new Set(["Cold water", "Temperate", "Tropical"]);
@@ -24,9 +25,10 @@ interface Props {
   onToggleChat?: () => void;
   shareUrl?: string;
   readOnly?: boolean;
+  donation?: DonationReceipt | null;
 }
 
-export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly }: Props) {
+export function Dashboard({ data, messages = [], isLoading = false, onToggleChat, shareUrl, readOnly, donation }: Props) {
   const single = data.mode === "single" && data.single_dive && data.all_dives.length === 1;
   const total = data.aggregate_stats.total_dives;
   const site = single ? data.all_dives[0].dive_site_name : null;
@@ -46,6 +48,8 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
             </a>
           </div>
         )}
+
+        {!readOnly && donation && <DonationNotice donation={donation} />}
 
         <div className="space-y-3">
           <DashboardHeader subject={subject} onToggleChat={onToggleChat} shareUrl={shareUrl} readOnly={readOnly} />

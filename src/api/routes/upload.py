@@ -2,37 +2,46 @@ import asyncio
 import logging
 import os
 import tempfile
-import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.api.dependencies import get_or_create_session
+from src.api.dependencies import get_donation_store, get_or_create_session
 from src.api.limits import limit_uploads
-from src.api.models import UploadResponse
-from src.config import settings
+from src.api.models import DonationReceipt, UploadResponse
 from src.parsers import get_parser
+from src.storage.donations import CONSENT_VERSION
 from src.storage.sanitize import sanitize
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _store_donation(content: bytes, filename: str) -> None:
+def _store_donation(
+    content: bytes, filename: str, dive_count: int, consent_version: str
+) -> DonationReceipt | None:
     """Keep a donated log with people, notes and serials stripped.
 
-    The raw upload is never written. The stored name is random: the
-    original filename can carry a name.
+    The raw upload is never written, and the stored name is random (the
+    original filename can carry a name). Returns None if nothing was stored.
     """
+    if consent_version != CONSENT_VERSION:
+        # The page showed older wording than the policy in force now.
+        logger.warning("Donation not stored: consent version %r", consent_version)
+        return None
     try:
         clean = sanitize(content, filename)
     except Exception:
         logger.warning("Donation not stored: could not sanitize", exc_info=True)
-        return
-    donations_dir = Path(settings.DONATIONS_DIR)
-    donations_dir.mkdir(parents=True, exist_ok=True)
-    ext = Path(filename).suffix.lower()
-    (donations_dir / f"{uuid.uuid4().hex}{ext}").write_bytes(clean)
+        return None
+    receipt = get_donation_store().save(
+        clean,
+        Path(filename).suffix.lower(),
+        dive_count=dive_count,
+        consent_version=consent_version,
+    )
+    return DonationReceipt(**asdict(receipt)) if receipt else None
 
 
 @router.post(
@@ -44,6 +53,7 @@ async def upload_dive_log(
     file: UploadFile = File(...),
     session_id: str = Form(default=None),
     donate: bool = Form(default=False),
+    consent_version: str = Form(default="", max_length=32),
 ):
     """Upload a dive log file, parse it, and store in the session."""
     # Strip path separators from client-supplied filename to prevent path traversal
@@ -77,16 +87,20 @@ async def upload_dive_log(
     if df.empty or "dive_number" not in df.columns:
         raise HTTPException(status_code=400, detail=f"No dives found in {filename}")
 
-    if donate:
-        await asyncio.to_thread(_store_donation, content, filename)
-
     sid, agent = get_or_create_session(session_id)
     await asyncio.to_thread(agent.set_dive_data, df)
     dive_numbers = agent.get_dive_numbers()
+
+    donation = None
+    if donate:
+        donation = await asyncio.to_thread(
+            _store_donation, content, filename, len(dive_numbers), consent_version
+        )
 
     return UploadResponse(
         session_id=sid,
         dive_count=len(dive_numbers),
         dive_numbers=[str(d) for d in dive_numbers],
         message=f"Successfully parsed {len(dive_numbers)} dives from {filename}",
+        donation=donation,
     )

@@ -111,6 +111,7 @@ function App() {
               onToggleChat={sharedId ? undefined : () => setChatOpen(true)}
               shareUrl={shareUrl}
               readOnly={!!sharedId}
+              donation={uploadResponse?.donation}
             />
           ) : (
             <div className="flex h-full items-center justify-center">

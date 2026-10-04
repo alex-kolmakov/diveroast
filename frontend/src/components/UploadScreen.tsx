@@ -102,8 +102,9 @@ export function UploadScreen({ onUploadComplete }: Props) {
         <span>
           Donate my dive log to help improve DiveRoast
           <span className="block text-xs">
-            The file is stored as uploaded, including GPS coordinates, dive dates and
-            site names.
+            Buddy and divemaster names, notes, device serial numbers and body data
+            are removed first. Dive profiles, dates, site names and GPS positions are
+            kept.
           </span>
         </span>
       </label>

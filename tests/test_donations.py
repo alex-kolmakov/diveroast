@@ -152,10 +152,28 @@ def anyio_backend():
 
 @pytest.fixture
 def donations_dir(tmp_path, monkeypatch):
+    import src.api.dependencies as deps
     from src.config import settings
 
     monkeypatch.setattr(settings, "DONATIONS_DIR", str(tmp_path))
+    monkeypatch.setattr(deps, "_donation_store", None)
     return tmp_path
+
+
+async def _post(path: str, **kwargs):
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(path, **kwargs)
+
+
+def _donate(**extra) -> dict:
+    from src.storage.donations import CONSENT_VERSION
+
+    return {"donate": "true", "consent_version": CONSENT_VERSION, **extra}
 
 
 async def _upload(content: bytes, name: str, **form) -> dict:
@@ -174,15 +192,106 @@ async def _upload(content: bytes, name: str, **form) -> dict:
 
 @pytest.mark.anyio
 async def test_donated_upload_is_stored_sanitized_under_a_random_name(donations_dir):
-    await _upload(UDDF_WITH_PEOPLE, "jane_buddy_log.uddf", donate="true")
-    stored = list(donations_dir.iterdir())
-    assert len(stored) == 1
-    assert "jane" not in stored[0].name
-    assert b"Jane" not in stored[0].read_bytes()
-    assert b"Blue Hole" in stored[0].read_bytes()
+    result = await _upload(UDDF_WITH_PEOPLE, "jane_buddy_log.uddf", **_donate())
+    donation = result["donation"]
+    assert donation["status"] == "stored"
+    log = donations_dir / f"{donation['id']}.uddf"
+    assert sorted(p.name for p in donations_dir.iterdir()) == sorted(
+        [log.name, f"{donation['id']}.json"]
+    )
+    assert b"Jane" not in log.read_bytes()
+    assert b"Blue Hole" in log.read_bytes()
 
 
 @pytest.mark.anyio
 async def test_upload_without_donate_stores_nothing(donations_dir):
     await _upload(UDDF_WITH_PEOPLE, "log.uddf")
     assert list(donations_dir.iterdir()) == []
+
+
+@pytest.mark.anyio
+async def test_consent_record_keeps_no_token_or_filename(donations_dir):
+    import json
+
+    from src.storage.donations import CONSENT_VERSION
+
+    result = await _upload(UDDF_WITH_PEOPLE, "jane_buddy_log.uddf", **_donate())
+    donation = result["donation"]
+    record = json.loads((donations_dir / f"{donation['id']}.json").read_text())
+    assert record["consent_version"] == CONSENT_VERSION
+    assert record["dive_count"] == 1
+    assert record["created_at"].endswith("+00:00")
+    token = donation["deletion_code"].split(".", 1)[1]
+    text = json.dumps(record)
+    assert token not in text and "jane" not in text
+
+
+@pytest.mark.anyio
+async def test_outdated_consent_stores_nothing(donations_dir):
+    result = await _upload(
+        UDDF_WITH_PEOPLE, "log.uddf", donate="true", consent_version="2020-01-01"
+    )
+    assert result["donation"] is None
+    assert list(donations_dir.iterdir()) == []
+
+
+@pytest.mark.anyio
+async def test_donor_deletes_with_their_code(donations_dir):
+    donation = (await _upload(UDDF_WITH_PEOPLE, "log.uddf", **_donate()))["donation"]
+    donation_id, token = donation["deletion_code"].split(".", 1)
+
+    wrong = await _post("/api/donations/delete", json={"code": f"{donation_id}.nope"})
+    assert wrong.status_code == 404
+    assert len(list(donations_dir.iterdir())) == 2
+
+    ok = await _post("/api/donations/delete", json={"code": donation["deletion_code"]})
+    assert ok.status_code == 204
+    assert list(donations_dir.iterdir()) == []
+    again = await _post(
+        "/api/donations/delete", json={"code": donation["deletion_code"]}
+    )
+    assert again.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_admin_deletes_by_id(donations_dir, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.main import app
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "ADMIN_SECRET", "s3cret")
+    donation = (await _upload(UDDF_WITH_PEOPLE, "log.uddf", **_donate()))["donation"]
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        path = f"/api/admin/donations/{donation['id']}"
+        assert (await client.delete(path)).status_code == 403
+        r = await client.delete(path, headers={"X-Admin-Secret": "s3cret"})
+    assert r.status_code == 204
+    assert list(donations_dir.iterdir()) == []
+
+
+@pytest.mark.anyio
+async def test_same_log_donated_twice_is_stored_once(donations_dir):
+    first = (await _upload(UDDF_WITH_PEOPLE, "a.uddf", **_donate()))["donation"]
+    second = (await _upload(UDDF_WITH_PEOPLE, "b.uddf", **_donate()))["donation"]
+    assert second == {"id": first["id"], "deletion_code": None, "status": "duplicate"}
+    assert len(list(donations_dir.iterdir())) == 2
+
+
+def test_storage_cap(tmp_path):
+    from src.storage.donations import DonationStore
+
+    store = DonationStore(str(tmp_path), max_total_bytes=1500)
+    assert store.save(b"x" * 1000, ".ssrf", dive_count=1, consent_version="v")
+    assert store.save(b"y" * 1000, ".ssrf", dive_count=1, consent_version="v") is None
+
+
+def test_bad_ids_never_touch_other_files(tmp_path):
+    from src.storage.donations import DonationStore
+
+    (tmp_path / "keep.json").write_text("{}")
+    store = DonationStore(str(tmp_path), max_total_bytes=10**6)
+    assert not store.delete("../keep")
+    assert not store.delete_with_code("*.x")
+    assert (tmp_path / "keep.json").exists()

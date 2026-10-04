@@ -2,9 +2,11 @@ import asyncio
 import hmac
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response
 
+from src.api.dependencies import get_donation_store
 from src.config import settings
+from src.storage.donations import DonationStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,3 +60,19 @@ async def refresh_rag(
         "status": "accepted",
         "message": f"RAG refresh ({mode}) started in background. Check logs for progress.",
     }
+
+
+@router.delete("/api/admin/donations/{donation_id}", status_code=204)
+async def admin_delete_donation(
+    donation_id: str,
+    x_admin_secret: str | None = Header(default=None),
+    store: DonationStore = Depends(get_donation_store),
+):
+    """Delete a donated log by id, for a donor who lost their code.
+
+    Protected by the X-Admin-Secret header.
+    """
+    _require_admin(x_admin_secret)
+    if not await asyncio.to_thread(store.delete, donation_id):
+        raise HTTPException(status_code=404, detail="No such donation")
+    return Response(status_code=204)

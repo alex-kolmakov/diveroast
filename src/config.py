@@ -83,8 +83,9 @@ class Settings(BaseSettings):
     # Snapshot storage (backed by Docker named volume in production)
     SNAPSHOT_DIR: str = "/tmp/diveroast-snapshots"
 
-    # Donated dive log storage
+    # Donated dive log storage (sanitized logs + consent records)
     DONATIONS_DIR: str = "/tmp/diveroast-donations"
+    DONATIONS_MAX_TOTAL_MB: int = 2048  # new donations are refused above this
 
     # Admin
     ADMIN_SECRET: str = ""  # Set in .env / Secret Manager to protect admin endpoints
