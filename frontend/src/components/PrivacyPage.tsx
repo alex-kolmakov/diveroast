@@ -49,7 +49,13 @@ export function PrivacyPage() {
             </li>
             <li>
               The server keeps traces of those calls (the summary, your messages and the
-              answers) to debug and improve the roasts.
+              answers) to debug and improve the roasts. Traces are deleted after 30
+              days.
+            </li>
+            <li>
+              When something breaks, an error report goes to Sentry: the error and
+              where in the code it happened. It doesn't include your log, your messages
+              or your IP address.
             </li>
             <li>
               Map thumbnails on the dashboard load from OpenStreetMap, which sees the
