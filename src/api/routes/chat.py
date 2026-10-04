@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from src.agent.conversation import DiverRoastAgent
+from src.agent.usage import daily_budget
 from src.api.dependencies import get_session, get_snapshot_store
 from src.api.limits import limit_chats
 from src.api.models import ChatRequest, Source
@@ -64,6 +65,12 @@ async def chat(
     if found is None:
         raise HTTPException(status_code=404, detail="Session not found")
     agent: DiverRoastAgent = found
+    if daily_budget.spent():
+        raise HTTPException(
+            status_code=503,
+            detail="DiveRoast has used up today's roasting budget. Your dashboard "
+            "still works; roasts are back after midnight UTC.",
+        )
     if agent.over_budget():
         logger.info("Session hit its budget (%s)", agent.over_budget())
         raise HTTPException(

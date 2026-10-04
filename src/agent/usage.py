@@ -1,10 +1,14 @@
 """Token accounting for model calls: logged, traced and counted for budgets."""
 
 import logging
+import threading
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 
 from google.genai import types
 from opentelemetry import trace
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +35,50 @@ def usage_of(response: types.GenerateContentResponse) -> Usage:
     )
 
 
+class DailyBudget:
+    """Tokens spent today (UTC) across every session: the circuit breaker.
+
+    Sits below the billing alert. In memory, so a restart starts the day
+    from zero; the billing alert is the backstop for that.
+    """
+
+    def __init__(self) -> None:
+        self._day: date | None = None
+        self._tokens = 0
+        self._lock = threading.Lock()
+
+    def _roll(self, today: date) -> None:
+        if today != self._day:
+            self._day, self._tokens = today, 0
+
+    def add(self, tokens: int, today: date | None = None) -> None:
+        with self._lock:
+            self._roll(today or datetime.now(UTC).date())
+            before = self._tokens
+            self._tokens += tokens
+            limit = settings.DAILY_MAX_TOKENS
+            if before < limit <= self._tokens:
+                logger.warning(
+                    "Daily token budget spent (%d of %d); roasts paused until "
+                    "midnight UTC",
+                    self._tokens,
+                    limit,
+                )
+
+    def spent(self, today: date | None = None) -> bool:
+        with self._lock:
+            self._roll(today or datetime.now(UTC).date())
+            return self._tokens >= settings.DAILY_MAX_TOKENS
+
+
+daily_budget = DailyBudget()
+
+
 def record_usage(response: types.GenerateContentResponse, call: str) -> Usage:
-    """Log and trace one model call's token counts; return them."""
+    """Log and trace one model call's token counts, count them against the
+    daily budget, and return them."""
     usage = usage_of(response)
+    daily_budget.add(usage.total)
     logger.info(
         "model call %s: %d in (%d cached), %d out",
         call,

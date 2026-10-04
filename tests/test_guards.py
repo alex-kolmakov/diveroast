@@ -301,3 +301,62 @@ def test_local_client_reports_usage():
     with patch.object(local.models._http, "post", return_value=reply):
         response = local.models.generate_content(model="x", contents="hi")
     assert usage_of(response).total == 150
+
+
+# --- Daily budget -----------------------------------------------------------
+
+
+def test_daily_budget_resets_at_midnight_utc(monkeypatch):
+    from datetime import date
+
+    from src.agent.usage import DailyBudget
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 100)
+    budget = DailyBudget()
+    budget.add(60, today=date(2026, 10, 20))
+    assert not budget.spent(today=date(2026, 10, 20))
+    budget.add(40, today=date(2026, 10, 20))
+    assert budget.spent(today=date(2026, 10, 20))
+    assert not budget.spent(today=date(2026, 10, 21))
+
+
+def test_every_model_call_counts_against_the_daily_budget(monkeypatch):
+    from src.agent.usage import daily_budget
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 1000)
+    agent = DiverRoastAgent()
+    agent._client = _answer_with_usage(990, 5)
+    with patch.object(agent, "_prior_search", return_value=""):
+        agent._run_turn("roast me", PROMPT)
+    assert daily_budget.spent()
+
+
+@pytest.mark.anyio
+async def test_spent_daily_budget_pauses_chat_and_llm_summaries(monkeypatch):
+    from src.agent.usage import daily_budget
+    from src.api.routes import dashboard
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 10)
+    daily_budget.add(10)
+    sid, agent = deps.get_or_create_session()
+    transport = ASGITransport(app=app)
+    with patch.object(agent, "_run_turn") as turn:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post(
+                "/api/chat", json={"message": "hi", "session_id": sid}
+            )
+    assert r.status_code == 503
+    assert "budget" in r.json()["detail"]
+    turn.assert_not_called()
+
+    dive = {
+        "dive_number": "7",
+        "site": "Reef",
+        "pick_reason": "Fastest ascent",
+        "issues": ["fast ascent"],
+        "stats": {"max_depth": 20.0},
+    }
+    with patch.object(dashboard, "get_client") as get_client:
+        summaries = dashboard._generate_dive_summaries([dive])
+    get_client.assert_not_called()
+    assert summaries == ["Dive #7 at Reef was flagged for fast ascent."]

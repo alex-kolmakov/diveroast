@@ -9,7 +9,7 @@ from google.genai import types
 
 from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import get_client
-from src.agent.usage import record_usage
+from src.agent.usage import daily_budget, record_usage
 from src.analysis.feature_engineering import (
     ascent_events,
     data_coverage,
@@ -318,6 +318,8 @@ def _generate_dive_summaries(
         )
 
     try:
+        if daily_budget.spent():
+            raise RuntimeError("daily token budget spent")
         client = get_client()
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,

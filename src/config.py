@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     SESSION_MAX_MESSAGES: int = 30
     SESSION_MAX_TOKENS: int = 1_000_000
 
+    # Daily budget across all sessions (UTC day). Once spent, chat stops and
+    # the dashboard uses template summaries until midnight UTC. One roast on a
+    # ~200-dive log is ~20k tokens.
+    DAILY_MAX_TOKENS: int = 20_000_000
+
     # Per-IP rate limits (per hour). Generous on purpose: a conference room or
     # office shares one IP, and the session and daily budgets cap the cost.
     UPLOADS_PER_IP_PER_HOUR: int = 60
