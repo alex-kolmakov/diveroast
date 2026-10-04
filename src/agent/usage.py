@@ -91,3 +91,28 @@ def record_usage(response: types.GenerateContentResponse, call: str) -> Usage:
     span.set_attribute("diveroast.tokens.cached", usage.cached)
     span.set_attribute("diveroast.tokens.output", usage.output)
     return usage
+
+
+def record_check(report) -> None:
+    """Log and trace the answer guard's results (src.agent.checks.Report)."""
+    if (
+        report.stripped
+        or report.banned
+        or report.dan_without_link
+        or report.format_issues
+    ):
+        logger.info(
+            "answer check: %d sentences stripped %s, banned %s, DAN unlinked %s, "
+            "format %s",
+            len(report.stripped),
+            report.ungrounded,
+            report.banned,
+            report.dan_without_link,
+            report.format_issues,
+        )
+    span = trace.get_current_span()
+    span.set_attribute("diveroast.check.stripped", len(report.stripped))
+    span.set_attribute("diveroast.check.ungrounded", report.ungrounded)
+    span.set_attribute("diveroast.check.banned", report.banned)
+    span.set_attribute("diveroast.check.dan_without_link", report.dan_without_link)
+    span.set_attribute("diveroast.check.format", report.format_issues)

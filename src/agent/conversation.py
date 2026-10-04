@@ -9,10 +9,11 @@ import pandas as pd
 from google.genai import types
 from openinference.instrumentation import using_attributes
 
+from src.agent.checks import DiveFacts, Grounding, Report, check_and_strip
 from src.agent.gemini_client import generate, get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
-from src.agent.usage import record_usage
+from src.agent.usage import record_check, record_usage
 from src.analysis.feature_engineering import extract_features
 from src.config import settings
 from src.observability import get_tracer
@@ -27,6 +28,12 @@ from src.tools.dive import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Everything in the answer quoted numbers the model wasn't given.
+UNBACKED_ANSWER = (
+    "I couldn't back that answer with numbers from your log, so I dropped it. "
+    "Ask about a specific dive by its site."
+)
 
 FORCE_ANSWER_NOTE = (
     "[System: tool-call limit reached. Answer now using the tool results "
@@ -80,6 +87,18 @@ def _hit_output_cap(response: types.GenerateContentResponse) -> bool:
     )
 
 
+def _dive_names(row) -> list[str]:
+    """How an answer can refer to a dive: site (and its short form), trip, number."""
+    names = [f"#{row['dive_number']}", f"dive {row['dive_number']}"]
+    for key in ("dive_site_name", "trip_name"):
+        name = str(row.get(key) or "").strip()
+        if not name or name == "N/A":
+            continue
+        short = re.split(r"[,(/]", name, maxsplit=1)[0].strip()
+        names.extend(n for n in {name, short} if len(n) >= 4)
+    return names
+
+
 def _dive_line(row) -> str:
     site = str(row.get("dive_site_name", "N/A"))
     trip = str(row.get("trip_name", ""))
@@ -125,6 +144,9 @@ class DiverRoastAgent:
         self.roast_sources: list[dict] = []
         self.last_prompt: str | None = None
         self.last_sources: list[dict[str, str]] = []
+        self.dive_facts: list[DiveFacts] = []
+        self.log_facts = ""  # log-wide aggregates and coverage, for the guard
+        self.last_check: Report | None = None
         # One turn at a time per session: a turn runs in a worker thread and
         # mutates the history. The dashboard lock keeps its Gemini summaries
         # to one build per log.
@@ -164,6 +186,12 @@ class DiverRoastAgent:
         self.features = features_df
 
         dive_lines = [_dive_line(row) for _, row in features_df.iterrows()]
+        # What the answer guard checks each sentence against (same 200 dives
+        # the model sees).
+        self.dive_facts = [
+            DiveFacts(names=_dive_names(row), line=line)
+            for (_, row), line in zip(features_df.iterrows(), dive_lines, strict=True)
+        ][:200]
 
         n = len(features_df)
         temps = features_df["avg_temp"]
@@ -212,6 +240,7 @@ class DiverRoastAgent:
             if len(dive_numbers) == 1
             else ""
         )
+        self.log_facts = f"{coverage_line(features_df)}\n{agg}"
         context_msg = (
             f"[System: The diver has uploaded a dive log containing {len(dive_numbers)} dives. "
             f"{scope}"
@@ -289,6 +318,37 @@ class DiverRoastAgent:
             return NO_DAN_MATERIAL_NOTE
         self.last_sources.extend(found.sources)
         return DAN_MATERIAL_NOTE.format(material=found.text)
+
+    def _grounding(self, prompt: str, material: str) -> Grounding:
+        """Everything the model was given this turn, for the answer guard.
+
+        The seed message (index 0) is left out: its per-dive lines come in
+        through ``dive_facts``, so each sentence is checked against the dives
+        it names rather than every number in the log.
+        """
+        texts = [prompt, self.log_facts, material]
+        for content in self.history[1:]:
+            for part in content.parts or []:
+                if part.text:
+                    texts.append(part.text)
+                elif part.function_response is not None:
+                    texts.append(str(part.function_response.response))
+        return Grounding(general="\n".join(texts), dives=self.dive_facts)
+
+    def _guard(self, text: str, prompt: str, material: str) -> str:
+        """Drop sentences quoting numbers the model wasn't given; count all
+        check results in the log and the trace."""
+        if not text:
+            return text
+        is_roast = self.roast_summary is None
+        cleaned, report = check_and_strip(
+            text, self._grounding(prompt, material), is_roast=is_roast
+        )
+        self.last_check = report
+        record_check(report)
+        if report.stripped and not cleaned.strip():
+            return UNBACKED_ANSWER
+        return cleaned
 
     def _with_material(self, turn_start: int, material: str) -> list[types.Content]:
         """The history as sent: the DAN material rides in this turn's message.
@@ -450,6 +510,7 @@ class DiverRoastAgent:
                 continue
 
             text = repair_dan_links(response.text or "", self.last_sources)
+            text = self._guard(text, prompt_ver.prompt, material)
             if text:
                 self.history.append(
                     types.Content(
