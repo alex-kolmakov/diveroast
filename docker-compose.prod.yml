@@ -62,6 +62,8 @@ services:
       args:
         # Empty = same-origin API calls through the nginx proxy above
         VITE_API_URL: ""
+        # Frontend Sentry project; empty = no error reports. From .env.
+        VITE_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
     container_name: diveroast-frontend
     depends_on:
       - backend
