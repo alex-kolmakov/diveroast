@@ -17,6 +17,7 @@ import pandas as pd
 from src.analysis.feature_engineering import (
     ASCENT_LIMIT_M_MIN,
     ASCENT_WINDOW_S,
+    COLD_WATER_C,
     SHALLOW_ASCENT_LIMIT_M_MIN,
     SHALLOW_ZONE_M,
     data_coverage,
@@ -26,6 +27,30 @@ from src.analysis.feature_engineering import (
 NDL_DANGER_MIN = 5.0
 SAC_HIGH_L_MIN = 20.0
 DEEP_M = 30.0
+# Thermal screening thresholds (heuristics, not DAN limits). The log has the
+# water temperature, not the diver's suit or body temperature.
+PROLONGED_COLD_MIN = 30.0  # minutes below COLD_WATER_C: hypothermia risk
+WARM_WATER_C = 29.0  # coldest in-water reading at or above this: warm dive
+LONG_WARM_MIN = 60.0  # ...for this long: dehydration, a DCS factor
+
+
+def thermal_flags(row) -> dict[str, bool]:
+    """Which thermal risks the measured data supports for one dive.
+
+    NaN (temperature not recorded) never raises a flag.
+    """
+    cold = row.get("cold_minutes")
+    stop = row.get("stop_temp")
+    water = row.get("water_min_temp")
+    minutes = row.get("dive_minutes")
+    return {
+        "prolonged_cold": measured(cold) and cold >= PROLONGED_COLD_MIN,
+        "cold_stops": measured(stop) and stop < COLD_WATER_C,
+        "long_warm": measured(water)
+        and water >= WARM_WATER_C
+        and measured(minutes)
+        and minutes >= LONG_WARM_MIN,
+    }
 
 
 def measured(value) -> bool:
@@ -109,6 +134,18 @@ def describe_features(row) -> str:
         parts.append(f"SAC rate {fmt(row['sac_rate'], unit=' L/min')}")
     if measured(row.get("avg_temp")):
         parts.append(f"average temperature {fmt(row['avg_temp'], unit=' °C')}")
+    if measured(row.get("dive_minutes")):
+        parts.append(f"duration {fmt(row['dive_minutes'], '.0f', ' min')}")
+    if measured(row.get("water_min_temp")):
+        parts.append(f"coldest water {fmt(row['water_min_temp'], unit=' °C')}")
+    if measured(row.get("cold_minutes")) and row["cold_minutes"] > 0:
+        parts.append(
+            f"{fmt(row['cold_minutes'], '.0f', ' min')} below {COLD_WATER_C:.0f} °C"
+        )
+    if measured(row.get("stop_temp")):
+        parts.append(
+            f"water during ascent and stops {fmt(row['stop_temp'], unit=' °C')}"
+        )
     if row.get("entered_deco"):
         parts.append("entered decompression")
     return ", ".join(parts) + "."
@@ -162,6 +199,25 @@ def dive_issues(row) -> list[str]:
         issues.append(
             f"DEEP DIVE: Maximum depth of {row['max_depth']:.1f}m. "
             f"Ensure you have appropriate training and gas planning for this depth."
+        )
+    flags = thermal_flags(row)
+    if flags["prolonged_cold"]:
+        issues.append(
+            f"PROLONGED COLD EXPOSURE: {row['cold_minutes']:.0f} min in water below "
+            f"{COLD_WATER_C:.0f} °C. Hypothermia risk depends on thermal protection, "
+            f"which the log doesn't record."
+        )
+    if flags["cold_stops"]:
+        issues.append(
+            f"COLD DECOMPRESSION PHASE: water during the ascent and stops was "
+            f"{row['stop_temp']:.1f} °C. Being cold while decompressing slows inert "
+            f"gas washout and raises DCS risk."
+        )
+    if flags["long_warm"]:
+        issues.append(
+            f"LONG WARM-WATER DIVE: {row['dive_minutes']:.0f} min in water no colder "
+            f"than {row['water_min_temp']:.1f} °C. Long, warm dives dehydrate, and "
+            f"dehydration is a DCS risk factor; hydration isn't in the log."
         )
     return issues
 
@@ -285,6 +341,17 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"{_pct(int((sac > SAC_HIGH_L_MIN).sum()), cov['sac'], 'dives with SAC')}",
         f"Deep dives (>{DEEP_M:.0f}m): {_pct(int((features['max_depth'] > DEEP_M).sum()), n)}",
     ]
+    if "cold_minutes" in features.columns:
+        temps = int(features["water_min_temp"].notna().sum())
+        flags = features.apply(thermal_flags, axis=1, result_type="expand")
+        concern_lines += [
+            f"Prolonged cold (≥{PROLONGED_COLD_MIN:.0f} min below {COLD_WATER_C:.0f} °C): "
+            f"{_pct(int(flags['prolonged_cold'].sum()), temps, 'dives with temperature')}",
+            f"Cold ascent and stops (<{COLD_WATER_C:.0f} °C): "
+            f"{_pct(int(flags['cold_stops'].sum()), temps, 'dives with temperature')}",
+            f"Long warm-water dives (≥{LONG_WARM_MIN:.0f} min, water ≥{WARM_WATER_C:.0f} °C): "
+            f"{_pct(int(flags['long_warm'].sum()), temps, 'dives with temperature')}",
+        ]
 
     def _offenders(col: str) -> list[str]:
         return [
@@ -333,6 +400,14 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
         keywords.append("high air consumption SAC rate breathing")
     if features["max_depth"].max() > DEEP_M:
         keywords.append("deep diving incident")
+    if "cold_minutes" in features.columns:
+        flags = features.apply(thermal_flags, axis=1, result_type="expand")
+        if flags["prolonged_cold"].any():
+            keywords.append("hypothermia cold water exposure thermal protection")
+        if flags["cold_stops"].any():
+            keywords.append("cold during decompression thermal status DCS risk")
+        if flags["long_warm"].any():
+            keywords.append("dehydration warm water decompression sickness hydration")
     return keywords
 
 

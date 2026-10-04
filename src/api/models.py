@@ -65,6 +65,11 @@ class DiveFeature(BaseModel):
     # Surfacing tier; defaults keep pre-P1 snapshots loadable
     max_shallow_ascend_speed: float | None = 0.0
     shallow_bolt_count: int = 0
+    # Thermal exposure; None when the computer logged no in-water temperature
+    dive_minutes: float | None = None
+    water_min_temp: float | None = None
+    cold_minutes: float | None = None
+    stop_temp: float | None = None
     dive_site_name: str
     trip_name: str
     latitude: float | None

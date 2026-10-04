@@ -14,17 +14,21 @@ from src.agent.gemini_client import generate, get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
-from src.analysis.feature_engineering import extract_features
+from src.analysis.feature_engineering import COLD_WATER_C, extract_features
 from src.config import settings
 from src.observability import get_tracer
 from src.rag.search import Retrieval
 from src.tools import dan
 from src.tools.dive import (
+    LONG_WARM_MIN,
+    PROLONGED_COLD_MIN,
+    WARM_WATER_C,
     anomaly_queries,
     build_anomaly_keywords,
     coverage_line,
     fmt,
     measured,
+    thermal_flags,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +128,8 @@ def _dive_line(row) -> str:
     parts = [
         f"depth {row['max_depth']:.1f}m",
     ]
+    if measured(row.get("dive_minutes")):
+        parts.append(f"{row['dive_minutes']:.0f}min long")
     if measured(row.get("max_ascend_speed")):
         parts.append(f"ascent {row['max_ascend_speed']:.1f}m/min")
     if measured(row.get("max_shallow_ascend_speed")):
@@ -140,6 +146,17 @@ def _dive_line(row) -> str:
         if measured(grad) and grad > 1:
             temp_str += f" (gradient {grad:.1f}°C)"
         parts.append(temp_str)
+    flags = thermal_flags(row)
+    if flags["prolonged_cold"]:
+        parts.append(
+            f"PROLONGED COLD {row['cold_minutes']:.0f}min below {COLD_WATER_C:.0f}°C"
+        )
+    if flags["cold_stops"]:
+        parts.append(f"COLD STOPS {row['stop_temp']:.1f}°C")
+    if flags["long_warm"]:
+        parts.append(
+            f"LONG WARM DIVE (water never below {row['water_min_temp']:.1f}°C)"
+        )
     return f"  #{row['dive_number']} {location}: " + ", ".join(parts)
 
 
@@ -226,6 +243,7 @@ class DiverRoastAgent:
 
         sac = features_df["sac_rate"]
         ndl = features_df["min_ndl"]
+        thermal = features_df.apply(thermal_flags, axis=1, result_type="expand")
         agg = (
             f"Aggregates ({n} dives): "
             f"avg max depth {features_df['max_depth'].mean():.1f}m, "
@@ -240,7 +258,10 @@ class DiverRoastAgent:
             f"lowest NDL {fmt(ndl.min(), '.0f', ' min')}, "
             f"{int(features_df['entered_deco'].sum())} dives entered deco | "
             f"temperature exposure: {temp_exposure_str}, "
-            f"avg thermocline gradient {fmt(features_df['temp_gradient'].mean(), unit='°C')}"
+            f"avg thermocline gradient {fmt(features_df['temp_gradient'].mean(), unit='°C')}, "
+            f"{int(thermal['prolonged_cold'].sum())} dives with prolonged cold, "
+            f"{int(thermal['cold_stops'].sum())} with cold stops, "
+            f"{int(thermal['long_warm'].sum())} long warm-water dives"
         )
 
         # Cap at 200 dives in context to avoid token bloat
@@ -270,7 +291,12 @@ class DiverRoastAgent:
             f"that stays in the top few metres). 'ascent' is the fastest 30-second sustained "
             f"ascent rate; 'surfacing' is the fastest approach to the surface through "
             f"the last 8 m, where the pressure change is largest. Both limits are "
-            f"10 m/min.\n\n"
+            f"10 m/min. Thermal flags come from water temperature only (not the "
+            f"suit or the diver's body): PROLONGED COLD is {PROLONGED_COLD_MIN:.0f}+ min "
+            f"below {COLD_WATER_C:.0f}°C (hypothermia risk), COLD STOPS means the ascent "
+            f"and stops were in water below {COLD_WATER_C:.0f}°C (slower gas washout, "
+            f"higher DCS risk), LONG WARM DIVE is {LONG_WARM_MIN:.0f}+ min in water of "
+            f"{WARM_WATER_C:.0f}°C or more (dehydration, a DCS factor).\n\n"
             f"{coverage_line(features_df)}\n\n"
             f"{agg}\n\nPer-dive summaries:\n{dive_summary}]"
         )

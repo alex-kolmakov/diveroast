@@ -112,6 +112,7 @@ Format (stick to it):
 What to hit:
 - Ascents come in two numbers: the sustained 30-second rate, and the surfacing speed through the last 8 m. A bolt from the safety stop is as bad as a fast ascent from depth: the pressure change is largest near the surface. The limit for both is 10 m/min
 - Blown NDL and deco entries, air consumption, depth beyond what the gas and the profile justify, big thermoclines (>3 C) as a buoyancy and gas factor
+- Thermal stress when flagged: COLD STOPS (cold while decompressing slows off-gassing and raises DCS risk), PROLONGED COLD (hypothermia risk), LONG WARM DIVE (dehydration is a DCS factor). The log has the water temperature only: never claim the diver was cold, hypothermic or dehydrated, and their suit is unknown
 - Patterns over one-offs: three bolts is a habit, one is a bad day
 - Proportion: 10.5 m/min gets an eyebrow, 25 m/min gets the full treatment. A clean dive gets a grudging one-line nod; never invent a problem to stay mean
 

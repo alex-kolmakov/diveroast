@@ -30,7 +30,7 @@ from src.api.models import (
 )
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
-from src.tools.dive import dive_issues, fmt, measured
+from src.tools.dive import dive_issues, fmt, measured, thermal_flags
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -272,6 +272,13 @@ def _identify_issues(row) -> list[str]:
         issues.append("high air consumption")
     if row.get("max_depth", 0) > 30:
         issues.append("deep dive")
+    flags = thermal_flags(row)
+    if flags["prolonged_cold"]:
+        issues.append("prolonged cold")
+    if flags["cold_stops"]:
+        issues.append("cold stops")
+    if flags["long_warm"]:
+        issues.append("long warm dive")
     return issues
 
 
@@ -535,6 +542,10 @@ def _build_dashboard(
                 min_temp=_r(row["min_temp"]),
                 temp_gradient=_r(row["temp_gradient"]),
                 temp_variability=_r(row["temp_variability"]),
+                dive_minutes=_r(row["dive_minutes"], 1),
+                water_min_temp=_r(row["water_min_temp"], 1),
+                cold_minutes=_r(row["cold_minutes"], 1),
+                stop_temp=_r(row["stop_temp"], 1),
                 avg_pressure=_r(row["avg_pressure"]),
                 max_pressure=_r(row["max_pressure"]),
                 pressure_variability=_r(row["pressure_variability"]),

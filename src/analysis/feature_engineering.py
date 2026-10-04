@@ -17,6 +17,15 @@ SURFACE_M = 1.0  # shallower than this counts as at the surface
 SURFACING_MARKS_M = (SHALLOW_ZONE_M, 6.0, 5.0, 4.0, 3.0)
 SHALLOW_ASCENT_LIMIT_M_MIN = 10.0
 
+# Thermal exposure. Logs record water temperature, not body temperature or
+# the suit, so these measure exposure, not the diver's state. DAN: prolonged
+# cold-water exposure risks hypothermia; being cold during decompression (the
+# ascent and stops) slows inert gas washout and raises DCS risk; warm,
+# dehydrating conditions are a DCS factor too.
+IN_WATER_M = 1.5  # shallower readings are often air or sun on the sensor
+COLD_WATER_C = 10.0
+STOP_ZONE_M = 6.0  # the ascent and safety-stop phase after the deepest point
+
 # An NDL of 0 is only a real reading if the computer counted down to it.
 NDL_COUNTDOWN_MAX_MIN = 5.0
 
@@ -213,6 +222,52 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=ASCENT_COLUMNS)
 
 
+def _thermal(dive: pd.DataFrame) -> dict[str, float]:
+    """Exposure features for one dive (sorted by time); NaN if not recorded.
+
+    Computers log temperature sparsely (Subsurface only on change), so each
+    reading holds until the next. Only in-water time counts. The first
+    readings are often air or sun on the sensor, which then cools with a
+    lag, so "warm water" is judged from the coldest reading: lag can't
+    inflate it.
+    """
+    times = dive["time"].to_numpy(dtype=float)
+    out = {
+        "dive_minutes": (times.max() - times.min()) / 60 if len(times) > 1 else np.nan,
+        "water_min_temp": np.nan,
+        "cold_minutes": np.nan,
+        "stop_temp": np.nan,
+    }
+    # Carry readings forward over the whole dive first: a computer that logs
+    # only on change may have one reading, taken in the first metre. Then
+    # measure only the in-water part.
+    in_water = dive["depth"] >= IN_WATER_M
+    water = dive[in_water]
+    temps = dive["temperature"].ffill()[in_water]
+    known = temps.notna()
+    if not known.any():
+        return out
+    t = water["time"].to_numpy(dtype=float)
+    step = np.diff(t, append=t[-1])  # each sample holds until the next one
+    out["water_min_temp"] = float(temps[known].min())
+    cold = (temps < COLD_WATER_C).to_numpy() & known.to_numpy()
+    out["cold_minutes"] = float(step[cold].sum() / 60)
+    deepest = dive["time"].iloc[int(np.argmax(dive["depth"].to_numpy()))]
+    stops = known & (water["time"] > deepest) & (water["depth"] <= STOP_ZONE_M)
+    if stops.any():
+        out["stop_temp"] = float(temps[stops].mean())
+    return out
+
+
+def thermal_exposure(data: pd.DataFrame) -> pd.DataFrame:
+    """Per-dive thermal exposure, from data sorted by dive and time."""
+    rows = [
+        {"dive_number": number, **_thermal(dive)}
+        for number, dive in data.groupby("dive_number", sort=False)
+    ]
+    return pd.DataFrame(rows)
+
+
 def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     """Extract per-dive features from a raw per-sample DataFrame.
 
@@ -260,6 +315,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     features["entered_deco"] = features.pop("deco_flag").fillna(0) >= 1
 
     features = features.merge(ascend_speed_features, on="dive_number")
+    features = features.merge(thermal_exposure(data), on="dive_number")
 
     # Temperature gradient: difference between warmest (surface) and coldest (depth)
     # Captures the thermocline the diver crossed within the dive.
