@@ -4,9 +4,10 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.api.dependencies import get_or_create_session
+from src.api.limits import limit_uploads
 from src.api.models import UploadResponse
 from src.config import settings
 from src.parsers import get_parser
@@ -14,7 +15,11 @@ from src.parsers import get_parser
 router = APIRouter()
 
 
-@router.post("/api/upload", response_model=UploadResponse)
+@router.post(
+    "/api/upload",
+    response_model=UploadResponse,
+    dependencies=[Depends(limit_uploads)],
+)
 async def upload_dive_log(
     file: UploadFile = File(...),
     session_id: str = Form(default=None),

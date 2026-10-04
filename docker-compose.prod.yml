@@ -24,6 +24,9 @@ services:
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       - PHOENIX_CLIENT_ENDPOINT=http://phoenix:6006
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      # The backend is reachable only through nginx, which sets X-Real-IP
+      # to the visitor's address (restored from Cloudflare's header).
+      - TRUST_PROXY_HEADERS=true
     depends_on:
       phoenix:
         condition: service_healthy

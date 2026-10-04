@@ -6,6 +6,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.agent.conversation import DiverRoastAgent
 from src.api.dependencies import get_session, get_snapshot_store
+from src.api.limits import limit_chats
 from src.api.models import ChatRequest, Source
 from src.storage.snapshots import SnapshotStore
 
@@ -48,7 +49,7 @@ async def _record_roast(
         )
 
 
-@router.post("/api/chat")
+@router.post("/api/chat", dependencies=[Depends(limit_chats)])
 async def chat(
     request: ChatRequest,
     store: SnapshotStore = Depends(get_snapshot_store),

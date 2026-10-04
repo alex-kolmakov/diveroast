@@ -156,3 +156,75 @@ async def test_oversized_chat_message_never_reaches_the_model():
     assert r.status_code == 422
     assert empty.status_code == 422
     turn.assert_not_called()
+
+
+# --- Per-IP rate limits -----------------------------------------------------
+
+
+def test_sliding_window_limits_and_recovers():
+    from src.api.limits import SlidingWindowLimiter
+
+    limiter = SlidingWindowLimiter(limit=2, window=60)
+    assert limiter.hit("a", now=0) is None
+    assert limiter.hit("a", now=10) is None
+    assert limiter.hit("a", now=20) == 40  # wait until the first hit expires
+    assert limiter.hit("b", now=20) is None  # other clients unaffected
+    assert limiter.hit("a", now=60) is None
+
+
+def test_limiter_memory_is_bounded():
+    from src.api.limits import SlidingWindowLimiter
+
+    limiter = SlidingWindowLimiter(limit=1, window=60, max_keys=100)
+    for i in range(1000):
+        limiter.hit(f"ip{i}", now=0)
+    assert len(limiter._hits) <= 100
+
+
+@pytest.mark.anyio
+async def test_uploads_are_rate_limited_per_ip(monkeypatch):
+    from src.api import limits
+
+    monkeypatch.setattr(limits.upload_limiter, "limit", 2)
+    transport = ASGITransport(app=app)
+    files = {"file": ("x.csv", b"a,b", "text/csv")}
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        codes = [
+            (await client.post("/api/upload", files=files)).status_code
+            for _ in range(3)
+        ]
+        limited = await client.post("/api/upload", files=files)
+    assert codes == [400, 400, 429]  # bad file type, but each attempt counts
+    assert "Retry-After" in limited.headers
+    assert "Too many uploads" in limited.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_chat_is_rate_limited_per_ip(monkeypatch):
+    from src.api import limits
+
+    monkeypatch.setattr(limits.chat_limiter, "limit", 1)
+    transport = ASGITransport(app=app)
+    body = {"message": "hi", "session_id": "nope"}
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/api/chat", json=body)
+        second = await client.post("/api/chat", json=body)
+    assert (first.status_code, second.status_code) == (404, 429)
+
+
+def test_proxy_header_is_trusted_only_when_configured(monkeypatch):
+    from starlette.requests import Request
+
+    from src.api.limits import client_ip
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"x-real-ip", b"203.0.113.9")],
+            "client": ("10.0.0.2", 1234),
+        }
+    )
+    monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", False)
+    assert client_ip(request) == "10.0.0.2"
+    monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
+    assert client_ip(request) == "203.0.113.9"

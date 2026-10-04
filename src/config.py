@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     SESSION_TTL_SECONDS: int = 6 * 60 * 60
     MAX_SESSIONS: int = 500
 
+    # Per-IP rate limits (per hour). Generous on purpose: a conference room or
+    # office shares one IP, and the session and daily budgets cap the cost.
+    UPLOADS_PER_IP_PER_HOUR: int = 60
+    CHATS_PER_IP_PER_HOUR: int = 300
+    # Trust X-Real-IP from the reverse proxy. Only true behind the production
+    # nginx; anywhere the backend is reachable directly the header is forgeable.
+    TRUST_PROXY_HEADERS: bool = False
+
     # Phoenix
     PHOENIX_COLLECTOR_ENDPOINT: str = "http://localhost:6006/v1/traces"
     PHOENIX_CLIENT_ENDPOINT: str = "http://localhost:6006"
