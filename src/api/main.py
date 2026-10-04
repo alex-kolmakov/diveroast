@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,6 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import admin, chat, dashboard, health, shared, upload
 from src.config import settings
 from src.observability import init_tracing
+
+# Libraries stay at WARNING; the app's own INFO lines (token usage per model
+# call, budget events) go to the container log.
+logging.basicConfig(
+    level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
+logging.getLogger("src").setLevel(logging.INFO)
 
 
 @asynccontextmanager

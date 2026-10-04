@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     SESSION_TTL_SECONDS: int = 6 * 60 * 60
     MAX_SESSIONS: int = 500
 
+    # Per-session budget: after this many messages or tokens (input + output,
+    # across every model call of the session's turns) the chat stops.
+    SESSION_MAX_MESSAGES: int = 30
+    SESSION_MAX_TOKENS: int = 1_000_000
+
     # Per-IP rate limits (per hour). Generous on purpose: a conference room or
     # office shares one IP, and the session and daily budgets cap the cost.
     UPLOADS_PER_IP_PER_HOUR: int = 60

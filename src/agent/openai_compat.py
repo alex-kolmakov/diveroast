@@ -147,7 +147,9 @@ class _Models:
 
         resp = self._http.post("/chat/completions", json=body)
         resp.raise_for_status()
-        message = resp.json()["choices"][0]["message"]
+        payload = resp.json()
+        message = payload["choices"][0]["message"]
+        usage = payload.get("usage") or {}
 
         parts: list[types.Part] = []
         text = _THINK_RE.sub("", message.get("content") or "").strip()
@@ -171,7 +173,11 @@ class _Models:
         return types.GenerateContentResponse(
             candidates=[
                 types.Candidate(content=types.Content(role="model", parts=parts))
-            ]
+            ],
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=usage.get("prompt_tokens"),
+                candidates_token_count=usage.get("completion_tokens"),
+            ),
         )
 
 

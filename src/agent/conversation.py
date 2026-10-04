@@ -12,6 +12,7 @@ from openinference.instrumentation import using_attributes
 from src.agent.gemini_client import get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
+from src.agent.usage import record_usage
 from src.analysis.feature_engineering import extract_features
 from src.config import settings
 from src.observability import get_tracer
@@ -130,6 +131,9 @@ class DiverRoastAgent:
         # to one build per log.
         self.turn_lock = asyncio.Lock()
         self.dashboard_lock = asyncio.Lock()
+        # Budget counters for the whole session (see over_budget).
+        self.messages_sent = 0
+        self.tokens_used = 0
 
     @property
     def client(self):
@@ -252,6 +256,14 @@ class DiverRoastAgent:
             key=dive_sort_key,
         )
 
+    def over_budget(self) -> str | None:
+        """Why this session may not send another message, or None."""
+        if self.messages_sent >= settings.SESSION_MAX_MESSAGES:
+            return "messages"
+        if self.tokens_used >= settings.SESSION_MAX_TOKENS:
+            return "tokens"
+        return None
+
     def _build_anomaly_keywords(self) -> str:
         """Build RAG-enriching keywords from measured dive anomalies."""
         return build_anomaly_keywords(getattr(self, "features", None))
@@ -351,6 +363,7 @@ class DiverRoastAgent:
         """
         self.last_sources = []
         self.last_prompt = self._describe_prompt(prompt_ver)
+        self.messages_sent += 1
         system_instruction = prompt_ver.prompt + self._prior_search(user_message)
         self.history.append(
             types.Content(
@@ -392,6 +405,7 @@ class DiverRoastAgent:
                 contents=self.history,
                 config=config,
             )
+            self.tokens_used += record_usage(response, f"chat step {step}").total
             if _hit_output_cap(response):
                 logger.warning(
                     "Answer cut at CHAT_MAX_OUTPUT_TOKENS=%d",

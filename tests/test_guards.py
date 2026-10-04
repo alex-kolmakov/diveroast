@@ -228,3 +228,76 @@ def test_proxy_header_is_trusted_only_when_configured(monkeypatch):
     assert client_ip(request) == "10.0.0.2"
     monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
     assert client_ip(request) == "203.0.113.9"
+
+
+# --- Token usage and session budget -----------------------------------------
+
+
+def _answer_with_usage(prompt_tokens: int, out_tokens: int, cached: int = 0):
+    from google.genai import types
+
+    client = _answer()
+    client.models.generate_content.return_value.usage_metadata = (
+        types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=prompt_tokens,
+            candidates_token_count=out_tokens,
+            thoughts_token_count=5,
+            cached_content_token_count=cached,
+        )
+    )
+    return client
+
+
+def test_turn_tokens_are_counted_and_logged(caplog):
+    import logging
+
+    agent = DiverRoastAgent()
+    agent._client = _answer_with_usage(1000, 50, cached=800)
+    with (
+        caplog.at_level(logging.INFO, logger="src.agent.usage"),
+        patch.object(agent, "_prior_search", return_value=""),
+    ):
+        agent._run_turn("roast me", PROMPT)
+    assert agent.messages_sent == 1
+    assert agent.tokens_used == 1055  # input + output + thinking
+    assert "1000 in (800 cached), 55 out" in caplog.text
+
+
+def test_session_budget(monkeypatch):
+    agent = DiverRoastAgent()
+    assert agent.over_budget() is None
+    agent.messages_sent = settings.SESSION_MAX_MESSAGES
+    assert agent.over_budget() == "messages"
+    agent.messages_sent = 0
+    agent.tokens_used = settings.SESSION_MAX_TOKENS
+    assert agent.over_budget() == "tokens"
+
+
+@pytest.mark.anyio
+async def test_chat_stops_when_the_session_budget_is_spent():
+    sid, agent = deps.get_or_create_session()
+    agent.tokens_used = settings.SESSION_MAX_TOKENS
+    transport = ASGITransport(app=app)
+    with patch.object(agent, "_run_turn") as turn:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post(
+                "/api/chat", json={"message": "hi", "session_id": sid}
+            )
+    assert r.status_code == 429
+    assert "Upload your log again" in r.json()["detail"]
+    turn.assert_not_called()
+
+
+def test_local_client_reports_usage():
+    from src.agent.openai_compat import OpenAICompatClient
+    from src.agent.usage import usage_of
+
+    local = OpenAICompatClient("http://local/v1", "k", "qwen")
+    reply = MagicMock()
+    reply.json.return_value = {
+        "choices": [{"message": {"content": "ok"}}],
+        "usage": {"prompt_tokens": 120, "completion_tokens": 30},
+    }
+    with patch.object(local.models._http, "post", return_value=reply):
+        response = local.models.generate_content(model="x", contents="hi")
+    assert usage_of(response).total == 150

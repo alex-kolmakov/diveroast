@@ -64,6 +64,12 @@ async def chat(
     if found is None:
         raise HTTPException(status_code=404, detail="Session not found")
     agent: DiverRoastAgent = found
+    if agent.over_budget():
+        logger.info("Session hit its budget (%s)", agent.over_budget())
+        raise HTTPException(
+            status_code=429,
+            detail="This chat has hit its limit. Upload your log again to start a new one.",
+        )
     if agent.turn_lock.locked():
         raise HTTPException(
             status_code=409, detail="Still answering your last message."

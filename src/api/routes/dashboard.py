@@ -9,6 +9,7 @@ from google.genai import types
 
 from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import get_client
+from src.agent.usage import record_usage
 from src.analysis.feature_engineering import (
     ascent_events,
     data_coverage,
@@ -325,6 +326,7 @@ def _generate_dive_summaries(
                 max_output_tokens=settings.SUMMARY_MAX_OUTPUT_TOKENS
             ),
         )
+        record_usage(response, "dive summaries")
         text = (response.text or "").strip()
         # Strip markdown code fences if present
         if text.startswith("```"):
