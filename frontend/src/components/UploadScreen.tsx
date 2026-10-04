@@ -93,19 +93,25 @@ export function UploadScreen({ onUploadComplete }: Props) {
         </p>
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+      {/* Same width as the drop zone, so the fine print doesn't run across the screen */}
+      <label className="flex w-full max-w-md cursor-pointer items-start gap-3 text-sm text-muted-foreground">
         <input
           type="checkbox"
           checked={donate}
           onChange={(e) => setDonate(e.target.checked)}
-          className="h-4 w-4 rounded border-muted accent-primary"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-muted accent-primary"
         />
-        <span>
-          Donate my dive log to help improve DiveRoast
-          <span className="block text-xs">
-            Buddy and divemaster names, notes, device serial numbers and body data
-            are removed first. Dive profiles, dates, site names and GPS positions are
-            kept for {RETENTION_DAYS} days, and you get a code to delete it sooner.{" "}
+        <span className="space-y-1">
+          <span className="block text-foreground/80">
+            Donate my dive log to help improve DiveRoast
+          </span>
+          <span className="block text-xs leading-relaxed">
+            Removed first: buddy and divemaster names, notes, device serial numbers and
+            body data.
+          </span>
+          <span className="block text-xs leading-relaxed">
+            Kept for {RETENTION_DAYS} days: dive profiles, dates, site names and GPS
+            positions. You get a code to delete it sooner.{" "}
             <a
               href="/privacy"
               onClick={(e) => e.stopPropagation()}
