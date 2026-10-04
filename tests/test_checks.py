@@ -9,7 +9,7 @@ from google.genai import types
 
 from src.agent.checks import DiveFacts, Grounding, check_and_strip, is_grounded
 from src.agent.conversation import UNBACKED_ANSWER, DiverRoastAgent
-from src.agent.system_prompts import _get_local_prompt
+from src.agent.system_prompts import LOCAL_PROMPT
 from src.parsers import get_parser
 
 FULL = "tests/fixtures/anonymized_subsurface_export.ssrf"
@@ -45,13 +45,13 @@ def test_invented_number_is_stripped_with_its_sentence():
     text = (
         "- Nura reef: 40.5 m is deep. Your 18.7 m/min ascent there was worse.\n"
         "- North red sea: 16.2 m/min surfacing.\n\n"
-        "Fix it: ascend at 9 m/min and hold 3 min at 5 m."
+        "Ascend at 9 m/min and hold 3 min at 5 m."
     )
     cleaned, report = check_and_strip(text, REAL_FACTS, is_roast=True)
     assert report.ungrounded == ["18.7 m/min"]
     assert "18.7" not in cleaned
     assert "Nura reef: 40.5 m is deep." in cleaned
-    assert "Fix it: ascend at 9 m/min" in cleaned  # advice isn't checked
+    assert "Ascend at 9 m/min" in cleaned  # diving constants count as grounded
 
 
 def test_number_from_another_dive_does_not_count():
@@ -78,7 +78,7 @@ def test_soft_checks_report_without_changing_the_text():
     assert cleaned == text
     assert report.banned == ["rocket"]
     assert report.dan_without_link
-    assert "no Fix it line" in report.format_issues
+    assert report.format_issues == ["1 list lines"]
 
 
 # --- The guard in the agent ---------------------------------------------------
@@ -110,7 +110,7 @@ def test_agent_strips_an_invented_number_before_anyone_sees_it():
     site, depth = _site_and_depth(agent)
     text = f"- {site}: {depth} m deep. You hit 97.3 m/min on the way up there."
     agent._client = _agent_answering(text)._client
-    prompt = _get_local_prompt()
+    prompt = LOCAL_PROMPT
     with patch.object(agent, "_prior_search", return_value=""):
         answer = agent._run_turn("roast me", prompt)
     assert "97.3" not in answer
@@ -122,7 +122,7 @@ def test_agent_strips_an_invented_number_before_anyone_sees_it():
 def test_agent_replaces_a_fully_unbacked_answer():
     agent = _agent_answering("Your 97.3 m/min ascent was wild.")
     with patch.object(agent, "_prior_search", return_value=""):
-        assert agent._run_turn("roast me", _get_local_prompt()) == UNBACKED_ANSWER
+        assert agent._run_turn("roast me", LOCAL_PROMPT) == UNBACKED_ANSWER
 
 
 # --- DAN links the model misused --------------------------------------------
@@ -234,14 +234,14 @@ def test_failed_incident_search_keeps_the_guidance():
     assert "Go slow." in material and "incident reports" not in material
 
 
-def test_prose_roasts_report_list_lines():
+def test_roasts_report_list_lines_and_length():
     from src.agent.checks import format_issues
 
-    listy = "Fast diver.\n- Nura reef: fast.\n- Blue Hole: deep.\n\nFix it: slow down."
-    prose = "Fast diver, always. Nura reef proves it.\n\nFix it: slow down."
-    assert "2 list lines" in format_issues(listy, is_roast=True, prose=True)
-    assert format_issues(prose, is_roast=True, prose=True) == []
-    assert format_issues(listy, is_roast=True, prose=False) == []  # v5 wanted bullets
+    listy = "Fast diver.\n- Nura reef: fast.\n- Blue Hole: deep."
+    prose = "Fast diver, always. Nura reef proves it."
+    assert format_issues(listy, is_roast=True) == ["2 list lines"]
+    assert format_issues(prose, is_roast=True) == []
+    assert format_issues("word " * 100, is_roast=False) == ["100 words"]
 
 
 def test_plain_text_source_note_becomes_a_citation():

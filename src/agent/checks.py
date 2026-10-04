@@ -108,23 +108,18 @@ def ungrounded_measures(sentence: str, values: list[float]) -> list[str]:
     ]
 
 
-def _is_advice(line: str) -> bool:
-    return line.lstrip("-*• ").lower().startswith("fix it")
-
-
 def check_and_strip(
-    text: str, grounding: Grounding, *, is_roast: bool, prose: bool = True
+    text: str, grounding: Grounding, *, is_roast: bool
 ) -> tuple[str, Report]:
     """Remove sentences quoting numbers the model wasn't given; report the rest.
 
     A sentence's numbers must come from the dives it names (by site or
-    number) or from log-wide facts. The "Fix it:" line is advice (drills,
-    target rates), not a claim about the log, so it isn't checked.
+    number) or from log-wide facts.
     """
     report = Report()
     kept_lines = []
     for line in text.splitlines():
-        if not line.strip() or _is_advice(line):
+        if not line.strip():
             kept_lines.append(line)
             continue
         prefix = re.match(r"\s*(?:[-*•]|\d+\.)\s+", line)
@@ -147,24 +142,18 @@ def check_and_strip(
     report.banned = sorted({m.group(0).lower() for m in _BANNED.finditer(cleaned)})
     without_links = _DAN_LINK.sub("", cleaned)
     report.dan_without_link = bool(re.search(r"\bDAN\b", without_links))
-    report.format_issues = format_issues(cleaned, is_roast=is_roast, prose=prose)
+    report.format_issues = format_issues(cleaned, is_roast=is_roast)
     return cleaned, report
 
 
-def format_issues(text: str, *, is_roast: bool, prose: bool = True) -> list[str]:
-    """Format slips against the prompt's rules (prose for v6 on, bullets before)."""
+def format_issues(text: str, *, is_roast: bool) -> list[str]:
+    """Format slips against the prompt: prose only, within its length."""
     words = len(re.findall(r"\w+", _DAN_LINK.sub("", text)))
-    bullets = [ln for ln in text.splitlines() if re.match(r"\s*(?:[-*•]|\d+\.)\s", ln)]
+    lists = [ln for ln in text.splitlines() if re.match(r"\s*(?:[-*•]|\d+\.)\s", ln)]
     issues = []
-    if prose and bullets:
-        issues.append(f"{len(bullets)} list lines")
-    if is_roast:
-        if not prose and len(bullets) > 4:
-            issues.append(f"{len(bullets)} bullets")
-        if not any(_is_advice(ln) for ln in text.splitlines()):
-            issues.append("no Fix it line")
-        if words > 150:  # 120 asked; some slack before it counts
-            issues.append(f"{words} words")
-    elif words > 90:  # 60 asked
+    if lists:
+        issues.append(f"{len(lists)} list lines")
+    limit = 150 if is_roast else 90  # 120 and 60 asked; some slack
+    if words > limit:
         issues.append(f"{words} words")
     return issues

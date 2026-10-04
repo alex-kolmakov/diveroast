@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from src.agent.system_prompts import (
-    PROMPT_VERSIONS,
+    LOCAL_PROMPT,
     PromptVersion,
     get_active_prompt,
     get_prompt_from_phoenix,
@@ -77,7 +77,7 @@ class TestGetActivePrompt:
             return_value=None,
         ):
             result = get_active_prompt()
-            assert result.version == 6
+            assert result == LOCAL_PROMPT
             assert result.phoenix_version_id is None
             assert "DiveRoast" in result.prompt
 
@@ -86,7 +86,6 @@ class TestGetActivePrompt:
         phoenix_pv = PromptVersion(
             version=0,
             label="phoenix-production",
-            changelog="Fetched from Phoenix",
             prompt="Phoenix system prompt here",
             phoenix_version_id="ver-123",
         )
@@ -98,27 +97,17 @@ class TestGetActivePrompt:
             assert result.phoenix_version_id == "ver-123"
             assert result.prompt == "Phoenix system prompt here"
 
-    def test_local_prompt_versions_exist(self):
-        """Verify local prompt versions are still available as fallback."""
-        assert 1 not in PROMPT_VERSIONS  # PROMPT_V1 retired
-        assert 2 in PROMPT_VERSIONS
-        assert 3 in PROMPT_VERSIONS
-        assert 4 in PROMPT_VERSIONS
-        assert 5 in PROMPT_VERSIONS
-        assert 6 in PROMPT_VERSIONS
-        for pv in PROMPT_VERSIONS.values():
-            assert pv.prompt
-            assert pv.label
+    def test_local_prompt_exists(self):
+        assert LOCAL_PROMPT.prompt and LOCAL_PROMPT.label and LOCAL_PROMPT.version
 
 
-def test_v6_is_prose_with_incidents_and_no_numbers_to_copy():
+def test_prompt_is_prose_with_incidents_and_no_numbers_to_copy():
     import re
 
-    v6 = PROMPT_VERSIONS[6]
-    assert v6.prose and not PROMPT_VERSIONS[5].prose
-    assert "bullet list" not in v6.prompt
-    assert "Prose only" in v6.prompt
-    assert "DAN incident reports" in v6.prompt
+    text = LOCAL_PROMPT.prompt
+    assert "Prose only" in text and "bullet list" not in text
+    assert "Fix it" not in text
+    assert "DAN incident reports" in text
     # Examples get copied, and a number in the prompt counts as grounded
     # for the answer guard: no measured-looking values in the prompt.
-    assert not re.search(r"\d+\.\d+ ?m/min", v6.prompt)
+    assert not re.search(r"\d+\.\d+ ?m/min", text)

@@ -432,7 +432,6 @@ class DiverRoastAgent:
             text,
             self._grounding(prompt_ver.prompt, material),
             is_roast=is_roast,
-            prose=prompt_ver.prose,
         )
         self.last_check = report
         record_check(report)
