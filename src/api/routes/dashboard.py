@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from google.genai import types
 
 from src.agent.conversation import DiverRoastAgent
-from src.agent.gemini_client import get_client
+from src.agent.gemini_client import generate, get_client
 from src.agent.usage import daily_budget, record_usage
 from src.analysis.feature_engineering import (
     ascent_events,
@@ -320,9 +320,11 @@ def _generate_dive_summaries(
     try:
         if daily_budget.spent():
             raise RuntimeError("daily token budget spent")
-        client = get_client()
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
+        # One retry only: the dashboard waits on this call, and the template
+        # below is a fine answer when the model is busy.
+        response = generate(
+            get_client(),
+            attempts=2,
             contents="\n".join(prompt_parts),
             config=types.GenerateContentConfig(
                 max_output_tokens=settings.SUMMARY_MAX_OUTPUT_TOKENS

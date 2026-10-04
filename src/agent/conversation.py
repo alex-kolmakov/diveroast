@@ -9,7 +9,7 @@ import pandas as pd
 from google.genai import types
 from openinference.instrumentation import using_attributes
 
-from src.agent.gemini_client import get_client
+from src.agent.gemini_client import generate, get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_usage
@@ -400,11 +400,7 @@ class DiverRoastAgent:
                         mode=types.FunctionCallingConfigMode.NONE
                     )
                 )
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=self.history,
-                config=config,
-            )
+            response = generate(self.client, contents=self.history, config=config)
             self.tokens_used += record_usage(response, f"chat step {step}").total
             if _hit_output_cap(response):
                 logger.warning(

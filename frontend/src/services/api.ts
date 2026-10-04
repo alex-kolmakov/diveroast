@@ -2,15 +2,21 @@ import type { DashboardData, Source, UploadResponse } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+// The server's own message (a string `detail`) if it sent one, else the fallback.
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") return body.detail;
+  } catch {
+    // not JSON
+  }
+  return `${fallback} (HTTP ${response.status})`;
+}
+
 async function fetchJSON<T>(url: string, fallback: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) {
-    try {
-      const error = await response.json();
-      throw new Error(error.detail || fallback);
-    } catch {
-      throw new Error(`${fallback} (HTTP ${response.status})`);
-    }
+    throw new Error(await errorMessage(response, fallback));
   }
   return response.json();
 }
@@ -35,8 +41,7 @@ export async function uploadDiveLog(
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || "Upload failed");
+    throw new Error(await errorMessage(response, "Upload failed"));
   }
 
   return response.json();
@@ -72,12 +77,12 @@ export function createChatStream(
     body: JSON.stringify({ message, session_id: sessionId }),
     signal: controller.signal,
   })
-    .then((response) => {
+    .then(async (response) => {
       if (!response.ok) {
         onError(
           response.status === 404
             ? "Session expired. Upload your log again."
-            : `Chat failed (HTTP ${response.status})`
+            : await errorMessage(response, "Chat failed")
         );
         return;
       }

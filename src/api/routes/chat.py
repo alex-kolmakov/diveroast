@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from src.agent.conversation import DiverRoastAgent
+from src.agent.gemini_client import ModelBusyError
 from src.agent.usage import daily_budget
 from src.api.dependencies import get_session, get_snapshot_store
 from src.api.limits import limit_chats
@@ -13,6 +14,12 @@ from src.storage.snapshots import SnapshotStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+MODEL_BUSY = (
+    "DiveRoast is roasting a lot of divers right now. Give it a minute and "
+    "send your message again."
+)
+TURN_FAILED = "Something went wrong writing that answer. Try sending it again."
 
 
 def _mark_cited(sources: list[dict[str, str]], text: str) -> list[dict]:
@@ -94,11 +101,12 @@ async def chat(
                 yield {"event": "sources", "data": json.dumps({"sources": sources})}
             await _record_roast(agent, text, sources, store)
             yield {"event": "done", "data": json.dumps({"status": "complete"})}
-        except Exception as e:
+        except ModelBusyError:
+            logger.warning("Chat turn gave up: model busy after retries")
+            yield {"event": "error", "data": json.dumps({"error": MODEL_BUSY})}
+        except Exception:
+            # The details stay in the log; the browser gets no internals.
             logger.exception("Chat turn failed")
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)}),
-            }
+            yield {"event": "error", "data": json.dumps({"error": TURN_FAILED})}
 
     return EventSourceResponse(event_generator(), ping=15)

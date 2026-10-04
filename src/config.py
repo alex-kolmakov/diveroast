@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     SESSION_TTL_SECONDS: int = 6 * 60 * 60
     MAX_SESSIONS: int = 500
 
+    # Backoff on model rate limits and 5xx: waits base, then 3x base.
+    MODEL_RETRY_BASE_SECONDS: float = 2.0
+
     # Per-session budget: after this many messages or tokens (input + output,
     # across every model call of the session's turns) the chat stops.
     SESSION_MAX_MESSAGES: int = 30

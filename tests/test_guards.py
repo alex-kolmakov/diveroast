@@ -360,3 +360,91 @@ async def test_spent_daily_budget_pauses_chat_and_llm_summaries(monkeypatch):
         summaries = dashboard._generate_dive_summaries([dive])
     get_client.assert_not_called()
     assert summaries == ["Dive #7 at Reef was flagged for fast ascent."]
+
+
+# --- Rate-limited model -----------------------------------------------------
+
+
+def _quota_error():
+    from google.genai import errors
+
+    return errors.ClientError(
+        429,
+        {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}},
+    )
+
+
+def test_model_429_is_retried_then_succeeds(monkeypatch):
+    from src.agent.gemini_client import generate
+
+    monkeypatch.setattr(settings, "MODEL_RETRY_BASE_SECONDS", 0)
+    client = _answer()
+    ok = client.models.generate_content.return_value
+    client.models.generate_content.side_effect = [_quota_error(), ok]
+    assert generate(client, contents="hi") is ok
+    assert client.models.generate_content.call_count == 2
+
+
+def test_model_429_gives_up_as_busy(monkeypatch):
+    from src.agent.gemini_client import ModelBusyError, generate
+
+    monkeypatch.setattr(settings, "MODEL_RETRY_BASE_SECONDS", 0)
+    client = MagicMock()
+    client.models.generate_content.side_effect = _quota_error()
+    with pytest.raises(ModelBusyError):
+        generate(client, contents="hi", attempts=3)
+    assert client.models.generate_content.call_count == 3
+
+
+def test_other_model_errors_are_not_retried():
+    from google.genai import errors
+
+    from src.agent.gemini_client import generate
+
+    client = MagicMock()
+    client.models.generate_content.side_effect = errors.ClientError(
+        400, {"error": {"code": 400, "message": "bad", "status": "INVALID_ARGUMENT"}}
+    )
+    with pytest.raises(errors.ClientError):
+        generate(client, contents="hi")
+    assert client.models.generate_content.call_count == 1
+
+
+async def _chat_error(agent, sid) -> str:
+    import json
+
+    transport = ASGITransport(app=app)
+    with patch("src.agent.conversation.get_active_prompt", return_value=PROMPT):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.post(
+                "/api/chat", json={"message": "hi", "session_id": sid}
+            )
+    errors_sent = [
+        json.loads(line[6:])["error"]
+        for line in r.text.splitlines()
+        if line.startswith("data: ") and '"error"' in line
+    ]
+    assert len(errors_sent) == 1
+    return errors_sent[0]
+
+
+@pytest.mark.anyio
+async def test_busy_model_gets_a_friendly_message(monkeypatch):
+    from src.api.routes.chat import MODEL_BUSY
+
+    monkeypatch.setattr(settings, "MODEL_RETRY_BASE_SECONDS", 0)
+    sid, agent = deps.get_or_create_session()
+    agent._client = MagicMock()
+    agent._client.models.generate_content.side_effect = _quota_error()
+    with patch.object(agent, "_prior_search", return_value=""):
+        assert await _chat_error(agent, sid) == MODEL_BUSY
+
+
+@pytest.mark.anyio
+async def test_internal_errors_are_not_sent_to_the_browser():
+    from src.api.routes.chat import TURN_FAILED
+
+    sid, agent = deps.get_or_create_session()
+    secret = "GEMINI_API_KEY=abc123 at /app/src/agent/conversation.py"
+    with patch.object(agent, "_run_turn", side_effect=RuntimeError(secret)):
+        assert await _chat_error(agent, sid) == TURN_FAILED
