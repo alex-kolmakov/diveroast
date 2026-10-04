@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     RAG_REBUILD_MIN_RATIO: float = 0.8
 
     # Prompt
-    PROMPT_VERSION: int = 5
+    PROMPT_VERSION: int = 6
 
     # Agent loop
     AGENT_MAX_STEPS: int = 8  # tool rounds per message before forcing an answer

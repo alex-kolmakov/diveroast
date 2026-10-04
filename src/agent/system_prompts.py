@@ -123,6 +123,45 @@ Hard rules:
 - Name the dive site, never just "Dive #38". If the site is unknown, name neither: just talk about the dive
 - If no dive log is uploaded yet, tell them to upload one. One line"""
 
+# v6: same voice and rules as v5, but prose instead of a bullet list of bad
+# dives. A log is roasted as the diver's habits, with dives named only as
+# evidence (the dashboard cards already go dive by dive); a single dive is
+# roasted as the story of that dive. DAN incident reports are used as the
+# strongest evidence when one matches.
+_V5_FORMAT = PROMPT_V5[
+    PROMPT_V5.index("- The verdict line is the best joke") : PROMPT_V5.index(
+        "What to hit:"
+    )
+]
+_V6_FORMAT = """- Open with the best joke in the roast, about this diver's signature sin. Never open with "You treat ... like ..." or "You dive like ..."
+- Funny beats thorough: every claim is a number plus a punchline, not a number plus a description of the risk
+- Roast the diving, never the person: no insults about body, age, gender, nationality or intelligence
+
+Format (stick to it):
+- A log of many dives: roast the diver, not the dives. Find the two or three habits this log keeps repeating and write them as a character read: who this diver is underwater. Back each habit with its number and name a dive or two in passing as evidence, by its site. No dive-by-dive tour: the dashboard already shows the worst dives. Two paragraphs of two or three sentences each (120 words in all, hard limit), then one "Fix it:" line with the drills that matter
+- A single dive: roast that dive as a story, in order: descent, bottom, ascent, stop, surfacing. Land the jabs on the moments that went wrong, with their numbers. One paragraph of three or four sentences (100 words, hard limit), then one "Fix it:" line
+- Follow-up answers: 60 words max. Answer the question, land one jab, stop
+- Prose only: no bullet points, no numbered lists, no headings. No intros, no recaps, no sign-off, no offers to help
+
+"""
+PROMPT_V6 = (
+    PROMPT_V5.replace(_V5_FORMAT, _V6_FORMAT)
+    .replace(
+        "- Patterns over one-offs: three bolts is a habit, one is a bad day",
+        "- Patterns over one-offs: three bolts is a habit, one is a bad day\n"
+        "- DAN incident reports: when one in the DAN material matches a habit in this "
+        "log, use it. One clause on what happened to that diver, cited, is the hardest "
+        "evidence you have. Never claim this diver's own dive ended that way",
+    )
+    .replace(
+        # Numbers in the prompt get copied, and count as grounded for the guard
+        "- Proportion: 10.5 m/min gets an eyebrow, 25 m/min gets the full treatment.",
+        "- Proportion: just over a limit gets an eyebrow, more than double it gets the "
+        "full treatment.",
+    )
+)
+assert PROMPT_V6 != PROMPT_V5 and "bullet list" not in PROMPT_V6
+
 PHOENIX_PROMPT_NAME = "diveroast-system"
 PHOENIX_PROMPT_TAG = "production"
 
@@ -134,27 +173,42 @@ class PromptVersion:
     changelog: str
     prompt: str
     phoenix_version_id: str | None = field(default=None)
+    # Roast written as prose (v6 on) rather than a bullet list; the answer
+    # checks report bullets as a format slip only for prose prompts.
+    prose: bool = True
 
 
 PROMPT_VERSIONS: dict[int, PromptVersion] = {
-    2: PromptVersion(2, "polite-analyst", "Too polite, forgettable", PROMPT_V2),
+    2: PromptVersion(
+        2, "polite-analyst", "Too polite, forgettable", PROMPT_V2, prose=False
+    ),
     3: PromptVersion(
         3,
         "dry-humor-analyst",
-        "Seasoned analyst with dry humor — production version",
+        "Seasoned analyst with dry humor",
         PROMPT_V3,
+        prose=False,
     ),
     4: PromptVersion(
         4,
         "sharp-ironic-analyst",
         "Data-driven irony, no name-calling, temperature-aware",
         PROMPT_V4,
+        prose=False,
     ),
     5: PromptVersion(
         5,
         "salty-divemaster",
-        "Harsh, funny, short, heavy on diving lingo — production version",
+        "Harsh, funny, short, heavy on diving lingo; bullet list of bad dives",
         PROMPT_V5,
+        prose=False,
+    ),
+    6: PromptVersion(
+        6,
+        "salty-divemaster-prose",
+        "v5 voice in prose: the diver's habits, or one dive's story; incident "
+        "reports as evidence — production version",
+        PROMPT_V6,
     ),
 }
 

@@ -77,7 +77,7 @@ class TestGetActivePrompt:
             return_value=None,
         ):
             result = get_active_prompt()
-            assert result.version == 5
+            assert result.version == 6
             assert result.phoenix_version_id is None
             assert "DiveRoast" in result.prompt
 
@@ -105,6 +105,20 @@ class TestGetActivePrompt:
         assert 3 in PROMPT_VERSIONS
         assert 4 in PROMPT_VERSIONS
         assert 5 in PROMPT_VERSIONS
+        assert 6 in PROMPT_VERSIONS
         for pv in PROMPT_VERSIONS.values():
             assert pv.prompt
             assert pv.label
+
+
+def test_v6_is_prose_with_incidents_and_no_numbers_to_copy():
+    import re
+
+    v6 = PROMPT_VERSIONS[6]
+    assert v6.prose and not PROMPT_VERSIONS[5].prose
+    assert "bullet list" not in v6.prompt
+    assert "Prose only" in v6.prompt
+    assert "DAN incident reports" in v6.prompt
+    # Examples get copied, and a number in the prompt counts as grounded
+    # for the answer guard: no measured-looking values in the prompt.
+    assert not re.search(r"\d+\.\d+ ?m/min", v6.prompt)

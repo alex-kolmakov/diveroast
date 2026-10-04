@@ -113,7 +113,7 @@ def _is_advice(line: str) -> bool:
 
 
 def check_and_strip(
-    text: str, grounding: Grounding, *, is_roast: bool
+    text: str, grounding: Grounding, *, is_roast: bool, prose: bool = True
 ) -> tuple[str, Report]:
     """Remove sentences quoting numbers the model wasn't given; report the rest.
 
@@ -147,16 +147,19 @@ def check_and_strip(
     report.banned = sorted({m.group(0).lower() for m in _BANNED.finditer(cleaned)})
     without_links = _DAN_LINK.sub("", cleaned)
     report.dan_without_link = bool(re.search(r"\bDAN\b", without_links))
-    report.format_issues = format_issues(cleaned, is_roast=is_roast)
+    report.format_issues = format_issues(cleaned, is_roast=is_roast, prose=prose)
     return cleaned, report
 
 
-def format_issues(text: str, *, is_roast: bool) -> list[str]:
+def format_issues(text: str, *, is_roast: bool, prose: bool = True) -> list[str]:
+    """Format slips against the prompt's rules (prose for v6 on, bullets before)."""
     words = len(re.findall(r"\w+", _DAN_LINK.sub("", text)))
+    bullets = [ln for ln in text.splitlines() if re.match(r"\s*(?:[-*•]|\d+\.)\s", ln)]
     issues = []
+    if prose and bullets:
+        issues.append(f"{len(bullets)} list lines")
     if is_roast:
-        bullets = [ln for ln in text.splitlines() if re.match(r"\s*[-*•]\s", ln)]
-        if len(bullets) > 4:
+        if not prose and len(bullets) > 4:
             issues.append(f"{len(bullets)} bullets")
         if not any(_is_advice(ln) for ln in text.splitlines()):
             issues.append("no Fix it line")

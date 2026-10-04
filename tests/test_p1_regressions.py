@@ -525,10 +525,15 @@ def test_dan_is_searched_before_every_answer(sparse_df):
         agent._run_turn("roast me", prompt)
         agent._run_turn("and my air?", prompt)
 
-    assert search.call_count == 2
-    queries = search.call_args.args[0]
+    # Per turn: guidance for the message and each anomaly, then incident
+    # cases for the anomalies only.
+    assert search.call_count == 4
+    guidance, incidents = search.call_args_list[-2], search.call_args_list[-1]
+    queries = guidance.args[0]
     assert queries[0] == "and my air?"  # the message, then one query per anomaly
     assert len(queries) > 1
+    assert incidents.kwargs["incidents_only"] is True
+    assert incidents.args[0] == queries[1:]
     sent = agent._client.models.generate_content.call_args.kwargs
     assert sent["config"].system_instruction == "p"  # stable, cacheable prefix
     turn = sent["contents"][-1]  # this turn's message

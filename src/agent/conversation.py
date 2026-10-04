@@ -3,6 +3,7 @@ import logging
 import re
 import secrets
 from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pandas as pd
@@ -53,6 +54,15 @@ DAN_MATERIAL_NOTE = (
     "where it backs your point, using the source title and URL shown; a hit "
     "that doesn't fit is not a citation.\n\n{material}]"
 )
+# Incident reports sit in their own section: unlabelled among ~1,900
+# articles they were outranked and never cited.
+INCIDENT_SECTION = (
+    "\n\nDAN incident reports: real divers who made the same mistakes as "
+    "this log, and what happened to them:\n\n{incidents}"
+)
+# One case per anomaly is plenty; the roast cites at most two sources.
+INCIDENTS_PER_ANOMALY = 1
+
 NO_DAN_MATERIAL_NOTE = (
     "[System: DAN material. Already searched for this message: nothing "
     "relevant was found. Don't cite DAN unless a search you run yourself "
@@ -64,6 +74,8 @@ NO_DAN_MATERIAL_NOTE = (
 _DAN_LINK = re.compile(r"\s*\(?\[DAN: ([^\]]+)\]\(([^)\s]+)\)\)?")
 # Any other markdown link to dan.org: "[Ascent Rates](url)", or a site name
 # the model turned into a link, "[Seven sisters](https://dan.org/...)".
+# A citation written as plain text: "(Source: Inflator Malfunction ...)"
+_SOURCE_NOTE = re.compile(r"\s*\(Source: ([^)]+)\)")
 _OTHER_DAN_LINK = re.compile(
     r"(\()?\[(?!DAN: )([^\]]+)\]\((https?://(?:www\.)?dan\.org[^)\s]*)\)(\))?"
 )
@@ -95,7 +107,15 @@ def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
             return f"{opened or ''}{label}{closed or ''}"
         return f"([DAN: {source['title']}]({source['url']}))"
 
-    return _DAN_LINK.sub(fix, _OTHER_DAN_LINK.sub(fix_other, text))
+    def fix_note(match: re.Match) -> str:
+        """A plain-text "(Source: Title)" becomes a link if it was retrieved."""
+        source = by_title.get(match.group(1).strip().lower())
+        if source is None:
+            return ""
+        return f" ([DAN: {source['title']}]({source['url']}))"
+
+    text = _SOURCE_NOTE.sub(fix_note, _OTHER_DAN_LINK.sub(fix_other, text))
+    return _DAN_LINK.sub(fix, text)
 
 
 def _hit_output_cap(response: types.GenerateContentResponse) -> bool:
@@ -349,18 +369,42 @@ class DiverRoastAgent:
         and each anomaly measured in the log, as separate queries. The result
         is for this turn only and is not written to the history.
         """
-        queries = [user_message, *anomaly_queries(getattr(self, "features", None))]
-        try:
-            found = dan.search_dan(queries, top_k=PRIOR_SEARCH_TOP_K)
-        except Exception:
-            logger.warning(
-                "Prior DAN search failed; answering without it", exc_info=True
+        anomalies = anomaly_queries(getattr(self, "features", None))
+        # Side by side: each takes ~3 s warm, so in turn they'd add ~6 s.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            guidance = pool.submit(
+                dan.search_dan, [user_message, *anomalies], top_k=PRIOR_SEARCH_TOP_K
             )
-            return ""
-        if not found.sources:
+            incident_cases = pool.submit(self._incident_search, anomalies)
+            try:
+                found = guidance.result()
+            except Exception:
+                logger.warning(
+                    "Prior DAN search failed; answering without it", exc_info=True
+                )
+                return ""
+            incidents = incident_cases.result()
+        if not found.sources and not incidents.sources:
             return NO_DAN_MATERIAL_NOTE
-        self.last_sources.extend(found.sources)
-        return DAN_MATERIAL_NOTE.format(material=found.text)
+        material = found.text if found.sources else ""
+        if incidents.sources:
+            material += INCIDENT_SECTION.format(incidents=incidents.text)
+        for source in [*found.sources, *incidents.sources]:
+            if source not in self.last_sources:
+                self.last_sources.append(source)
+        return DAN_MATERIAL_NOTE.format(material=material.strip())
+
+    def _incident_search(self, anomalies: list[str]) -> Retrieval:
+        """The best-matching DAN incident case for each anomaly in the log."""
+        if not anomalies:
+            return Retrieval(text="")
+        try:
+            return dan.search_dan(
+                anomalies, top_k=INCIDENTS_PER_ANOMALY, incidents_only=True
+            )
+        except Exception:
+            logger.warning("Incident search failed; guidance only", exc_info=True)
+            return Retrieval(text="")
 
     def _grounding(self, prompt: str, material: str) -> Grounding:
         """Everything the model was given this turn, for the answer guard.
@@ -378,14 +422,17 @@ class DiverRoastAgent:
                     texts.append(str(part.function_response.response))
         return Grounding(general="\n".join(texts), dives=self.dive_facts)
 
-    def _guard(self, text: str, prompt: str, material: str) -> str:
+    def _guard(self, text: str, prompt_ver: PromptVersion, material: str) -> str:
         """Drop sentences quoting numbers the model wasn't given; count all
         check results in the log and the trace."""
         if not text:
             return text
         is_roast = self.roast_summary is None
         cleaned, report = check_and_strip(
-            text, self._grounding(prompt, material), is_roast=is_roast
+            text,
+            self._grounding(prompt_ver.prompt, material),
+            is_roast=is_roast,
+            prose=prompt_ver.prose,
         )
         self.last_check = report
         record_check(report)
@@ -553,7 +600,7 @@ class DiverRoastAgent:
                 continue
 
             text = repair_dan_links(response.text or "", self.last_sources)
-            text = self._guard(text, prompt_ver.prompt, material)
+            text = self._guard(text, prompt_ver, material)
             if text:
                 self.history.append(
                     types.Content(

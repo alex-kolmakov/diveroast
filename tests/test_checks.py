@@ -182,3 +182,79 @@ def test_dive_without_a_site_is_not_called_unknown():
     seed = agent.history[0].parts[0].text
     assert "unknown:" not in seed
     assert "(no site name recorded)" in seed
+
+
+# --- Incident reports in the DAN material -----------------------------------
+
+
+def test_incident_cases_get_their_own_section(monkeypatch):
+    from src.rag.search import Retrieval
+
+    agent = _agent_answering("ok")
+    guidance = Retrieval(
+        text="[Source: Ascent Rates](https://dan.org/a)\\nGo slow.",
+        sources=[{"title": "Ascent Rates", "url": "https://dan.org/a"}],
+    )
+    case = Retrieval(
+        text="[Source: Runaway Ascent](https://dan.org/case-summaries/r)\\nHe bolted.",
+        sources=[
+            {"title": "Runaway Ascent", "url": "https://dan.org/case-summaries/r"}
+        ],
+    )
+
+    def search(queries, top_k=None, incidents_only=False):
+        return case if incidents_only else guidance
+
+    with patch("src.agent.conversation.dan.search_dan", side_effect=search):
+        material = agent._prior_search("roast me")
+    assert "Go slow." in material
+    assert "DAN incident reports" in material and "He bolted." in material
+    assert [s["title"] for s in agent.last_sources] == [
+        "Ascent Rates",
+        "Runaway Ascent",
+    ]
+
+
+def test_failed_incident_search_keeps_the_guidance():
+    from src.rag.search import Retrieval
+
+    agent = _agent_answering("ok")
+    guidance = Retrieval(
+        text="[Source: Ascent Rates](https://dan.org/a)\\nGo slow.",
+        sources=[{"title": "Ascent Rates", "url": "https://dan.org/a"}],
+    )
+
+    def search(queries, top_k=None, incidents_only=False):
+        if incidents_only:
+            raise RuntimeError("filter failed")
+        return guidance
+
+    with patch("src.agent.conversation.dan.search_dan", side_effect=search):
+        material = agent._prior_search("roast me")
+    assert "Go slow." in material and "incident reports" not in material
+
+
+def test_prose_roasts_report_list_lines():
+    from src.agent.checks import format_issues
+
+    listy = "Fast diver.\n- Nura reef: fast.\n- Blue Hole: deep.\n\nFix it: slow down."
+    prose = "Fast diver, always. Nura reef proves it.\n\nFix it: slow down."
+    assert "2 list lines" in format_issues(listy, is_roast=True, prose=True)
+    assert format_issues(prose, is_roast=True, prose=True) == []
+    assert format_issues(listy, is_roast=True, prose=False) == []  # v5 wanted bullets
+
+
+def test_plain_text_source_note_becomes_a_citation():
+    """Seen 2026-10-04: an incident used as "(Source: Title)", unlinked."""
+    from src.agent.conversation import repair_dan_links
+
+    sources = [
+        {"title": "Inflator Malfunction", "url": "https://dan.org/case-summaries/i/"}
+    ]
+    text = "One diver lost control (Source: Inflator Malfunction), yet you keep at it."
+    assert repair_dan_links(text, sources) == (
+        "One diver lost control ([DAN: Inflator Malfunction]"
+        "(https://dan.org/case-summaries/i/)), yet you keep at it."
+    )
+    unknown = "Trust me (Source: Something Invented)."
+    assert repair_dan_links(unknown, sources) == "Trust me."
