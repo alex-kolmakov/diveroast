@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 
 from src.api.models import DashboardResponse
@@ -15,6 +16,9 @@ class SnapshotStore:
         raise NotImplementedError
 
     async def load(self, share_id: str) -> DashboardResponse | None:
+        raise NotImplementedError
+
+    def purge(self, max_age_days: int, now: float | None = None) -> int:
         raise NotImplementedError
 
 
@@ -34,6 +38,16 @@ class LocalSnapshotStore(SnapshotStore):
         path = self._safe_path(share_id)
         await asyncio.to_thread(path.write_text, data.model_dump_json())
         logger.info("Snapshot saved: %s", path)
+
+    def purge(self, max_age_days: int, now: float | None = None) -> int:
+        """Delete snapshots last saved more than ``max_age_days`` ago."""
+        cutoff = (time.time() if now is None else now) - max_age_days * 86400
+        removed = 0
+        for path in self._dir.glob("*.json"):
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                removed += 1
+        return removed
 
     async def load(self, share_id: str) -> DashboardResponse | None:
         try:

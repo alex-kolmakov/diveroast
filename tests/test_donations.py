@@ -336,3 +336,60 @@ async def test_undonated_upload_has_no_donation_link(donations_dir):
     result = await _upload(UDDF_WITH_PEOPLE, "log.uddf")
     agent = deps.get_session(result["session_id"])
     assert agent is not None and agent.donation_id is None
+
+
+# --- Retention --------------------------------------------------------------
+
+
+def test_old_donations_are_purged(tmp_path):
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from src.storage.donations import DonationStore
+
+    store = DonationStore(str(tmp_path), max_total_bytes=10**6)
+    old = store.save(b"old", ".ssrf", dive_count=1, consent_version="v")
+    new = store.save(b"new", ".ssrf", dive_count=1, consent_version="v")
+    assert old and new
+    record_path = tmp_path / f"{old.id}.json"
+    record = json.loads(record_path.read_text())
+    record["created_at"] = "2025-01-01T00:00:00+00:00"
+    record_path.write_text(json.dumps(record))
+
+    legacy = tmp_path / "20260310T101010_Jane Smith.ssrf"  # raw, pre-records
+    legacy.write_bytes(b"<divelog/>")
+    year_ago = (datetime.now(UTC) - timedelta(days=400)).timestamp()
+    os.utime(legacy, (year_ago, year_ago))
+
+    assert store.purge(365) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        [f"{new.id}.ssrf", f"{new.id}.json"]
+    )
+
+
+def test_old_shared_links_are_purged(tmp_path):
+    import time
+
+    from src.storage.snapshots import LocalSnapshotStore
+
+    store = LocalSnapshotStore(str(tmp_path))
+    (tmp_path / "old.json").write_text("{}")
+    (tmp_path / "new.json").write_text("{}")
+    long_ago = time.time() - 400 * 86400
+    os.utime(tmp_path / "old.json", (long_ago, long_ago))
+    assert store.purge(365) == 1
+    assert [p.name for p in tmp_path.iterdir()] == ["new.json"]
+
+
+def test_purge_runs_on_both_stores(donations_dir, tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from src.storage import retention
+
+    with (
+        patch("src.api.dependencies.get_donation_store") as donations,
+        patch("src.api.dependencies.get_snapshot_store") as snapshots,
+    ):
+        retention.purge_once()
+    donations.return_value.purge.assert_called_once()
+    snapshots.return_value.purge.assert_called_once()

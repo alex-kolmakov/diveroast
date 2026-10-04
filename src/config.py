@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     DONATIONS_DIR: str = "/tmp/diveroast-donations"
     DONATIONS_MAX_TOTAL_MB: int = 2048  # new donations are refused above this
 
+    # Retention, enforced on startup and every few hours. The privacy page
+    # states these numbers.
+    DONATION_RETENTION_DAYS: int = 365
+    SNAPSHOT_RETENTION_DAYS: int = 365  # shared links
+
     # Admin
     ADMIN_SECRET: str = ""  # Set in .env / Secret Manager to protect admin endpoints
 

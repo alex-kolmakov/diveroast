@@ -16,7 +16,7 @@ import re
 import secrets
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +115,33 @@ class DonationStore:
                 return
             record["roast"] = roast
             self._write(record)
+
+    def purge(self, max_age_days: int, now: datetime | None = None) -> int:
+        """Delete donations older than ``max_age_days``; return how many.
+
+        Age comes from the consent record. A file with no record (one left
+        by a crash, or saved before records existed) goes by its mtime.
+        """
+        now = now or datetime.now(UTC)
+        cutoff = now - timedelta(days=max_age_days)
+        removed = 0
+        with self._lock:
+            if not self._dir.exists():
+                return 0
+            recorded = set()
+            for record in list(self._records()):
+                recorded.add(record["id"])
+                if datetime.fromisoformat(record["created_at"]) < cutoff:
+                    self._remove(record["id"])
+                    removed += 1
+            for path in self._dir.iterdir():
+                if path.stem in recorded or not path.is_file():
+                    continue
+                mtime = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+                if mtime < cutoff:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+        return removed
 
     def delete_with_code(self, code: str) -> bool:
         """Delete by the donor's code; False if it matches nothing."""

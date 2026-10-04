@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import admin, chat, dashboard, donations, health, shared, upload
 from src.config import settings
 from src.observability import init_tracing
+from src.storage.retention import purge_forever
 
 # Libraries stay at WARNING; the app's own INFO lines (token usage per model
 # call, budget events) go to the container log.
@@ -19,7 +21,9 @@ logging.getLogger("src").setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_tracing()
+    retention = asyncio.create_task(purge_forever())
     yield
+    retention.cancel()
 
 
 app = FastAPI(title="DiveRoast API", version="0.1.0", lifespan=lifespan)
