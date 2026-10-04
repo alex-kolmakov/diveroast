@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.observability import alert
+
 logger = logging.getLogger(__name__)
 
 # Bump whenever the donation wording on the upload screen or the privacy
@@ -69,7 +71,7 @@ class DonationStore:
                 if record.get("sha256") == digest:
                     return Receipt(record["id"], None, "duplicate")
             if self._total_bytes() + len(clean) > self._max_total_bytes:
-                logger.warning("Donation not stored: DONATIONS_MAX_TOTAL_MB reached")
+                alert("Donation storage full; new donations are refused")
                 return None
             donation_id = secrets.token_hex(8)
             token = secrets.token_urlsafe(16)

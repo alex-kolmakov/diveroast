@@ -588,3 +588,22 @@ def test_phoenix_export_errors_do_not_reach_sentry(sentry_events):
     sentry_sdk.flush()
     loggers = [e.get("logger") for e in sentry_events]
     assert loggers == ["src.agent.conversation"]
+
+
+def test_operational_alerts_reach_sentry(sentry_events, monkeypatch, tmp_path):
+    import sentry_sdk
+
+    from src.agent.usage import DailyBudget
+    from src.storage.donations import DonationStore
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 10)
+    DailyBudget().add(10)
+    DonationStore(str(tmp_path), max_total_bytes=1).save(
+        b"xx", ".ssrf", dive_count=1, consent_version="v"
+    )
+    sentry_sdk.flush()
+    messages = {
+        e.get("message") or e.get("logentry", {}).get("message") for e in sentry_events
+    }
+    assert "Daily token budget spent; roasts paused until midnight UTC" in messages
+    assert "Donation storage full; new donations are refused" in messages

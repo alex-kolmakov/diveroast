@@ -9,6 +9,7 @@ from google.genai import types
 from opentelemetry import trace
 
 from src.config import settings
+from src.observability import alert
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +59,10 @@ class DailyBudget:
             self._tokens += tokens
             limit = settings.DAILY_MAX_TOKENS
             if before < limit <= self._tokens:
-                logger.warning(
-                    "Daily token budget spent (%d of %d); roasts paused until "
-                    "midnight UTC",
-                    self._tokens,
-                    limit,
+                alert(
+                    "Daily token budget spent; roasts paused until midnight UTC",
+                    tokens=self._tokens,
+                    limit=limit,
                 )
 
     def spent(self, today: date | None = None) -> bool:

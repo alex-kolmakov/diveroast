@@ -13,6 +13,7 @@ from src.api.dependencies import get_donation_store, get_session, get_snapshot_s
 from src.api.limits import limit_chats
 from src.api.models import ChatRequest, Source
 from src.config import settings
+from src.observability import alert
 from src.storage.donations import DonationStore
 from src.storage.snapshots import SnapshotStore
 
@@ -121,8 +122,8 @@ async def chat(
                 yield {"event": "sources", "data": json.dumps({"sources": sources})}
             await _record_roast(agent, text, sources, store, donations)
             yield {"event": "done", "data": json.dumps({"status": "complete"})}
-        except ModelBusyError:
-            logger.warning("Chat turn gave up: model busy after retries")
+        except ModelBusyError as e:
+            alert("Model busy after retries", error=str(e))
             yield {"event": "error", "data": json.dumps({"error": MODEL_BUSY})}
         except Exception:
             # The details stay in the log; the browser gets no internals.
