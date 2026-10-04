@@ -133,3 +133,26 @@ def test_local_client_passes_the_output_cap():
             config=types.GenerateContentConfig(max_output_tokens=64),
         )
     assert post.call_args.kwargs["json"]["max_tokens"] == 64
+
+
+# --- Message length ---------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_oversized_chat_message_never_reaches_the_model():
+    from src.api.models import CHAT_MESSAGE_MAX_CHARS
+
+    sid, agent = deps.get_or_create_session()
+    transport = ASGITransport(app=app)
+    with patch.object(agent, "_run_turn") as turn:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            too_long = "a" * (CHAT_MESSAGE_MAX_CHARS + 1)
+            r = await client.post(
+                "/api/chat", json={"message": too_long, "session_id": sid}
+            )
+            empty = await client.post(
+                "/api/chat", json={"message": "", "session_id": sid}
+            )
+    assert r.status_code == 422
+    assert empty.status_code == 422
+    turn.assert_not_called()

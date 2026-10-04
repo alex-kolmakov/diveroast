@@ -1,9 +1,14 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# Longest chat message accepted. Every message goes into the model context
+# and is resent on each later turn, so it is a cost limit as much as a sanity
+# check. The frontend input uses the same number.
+CHAT_MESSAGE_MAX_CHARS = 2000
 
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: str
+    message: str = Field(min_length=1, max_length=CHAT_MESSAGE_MAX_CHARS)
+    session_id: str = Field(max_length=64)
 
 
 class ChatMessage(BaseModel):

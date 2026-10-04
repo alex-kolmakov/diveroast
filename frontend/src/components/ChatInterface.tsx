@@ -53,6 +53,7 @@ export function ChatInterface({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          maxLength={2000} // CHAT_MESSAGE_MAX_CHARS in src/api/models.py
           placeholder={
             sessionId ? "Ask about your dives..." : "Upload a dive log first..."
           }
