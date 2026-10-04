@@ -1,9 +1,12 @@
+import asyncio
 import json
 import logging
 from typing import cast
 
+import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
+from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import get_client
 from src.analysis.feature_engineering import (
     ascent_events,
@@ -478,10 +481,29 @@ async def get_dashboard(
         raise HTTPException(status_code=404, detail="Session not found")
     if agent.dive_data is None:
         raise HTTPException(status_code=400, detail="No dive data in session")
-    if agent.dashboard is not None:
-        return agent.dashboard.model_copy(update={"session_id": session_id})
+    # The lock stops a double fetch (React StrictMode, a reload) from paying
+    # for the Gemini summaries twice; the build runs in a thread so it
+    # doesn't stall every other request.
+    async with agent.dashboard_lock:
+        if agent.dashboard is None:
+            response = await asyncio.to_thread(
+                _build_dashboard, agent, agent.dive_data, session_id
+            )
+            agent.dashboard = response
+            # Persist the public snapshot under the share ID, without the session ID
+            background_tasks.add_task(
+                store.save,
+                agent.share_id,
+                response.model_copy(update={"session_id": None}),
+            )
+    return agent.dashboard.model_copy(update={"session_id": session_id})
 
-    features_df = extract_features(agent.dive_data)
+
+def _build_dashboard(
+    agent: DiverRoastAgent, dive_data: pd.DataFrame, session_id: str
+) -> DashboardResponse:
+    """Compute the dashboard for the session's log (blocking: runs in a thread)."""
+    features_df = extract_features(dive_data)
     # Rank key for the "low NDL" pick: a deco entry is worse than any NDL.
     features_df["ndl_rank"] = features_df["min_ndl"].where(
         ~features_df["entered_deco"], -1.0
@@ -644,15 +666,8 @@ async def get_dashboard(
         roast_prompt=agent.roast_prompt,
         roast_sources=agent.roast_sources,
         mode="single" if single else "log",
-        single_dive=_build_single_dive(agent.dive_data, features_df.iloc[0])
+        single_dive=_build_single_dive(dive_data, features_df.iloc[0])
         if single
         else None,
     )
-    agent.dashboard = response
-
-    # Persist the public snapshot under the share ID, without the session ID
-    background_tasks.add_task(
-        store.save, agent.share_id, response.model_copy(update={"session_id": None})
-    )
-
     return response

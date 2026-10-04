@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import secrets
@@ -117,6 +118,11 @@ class DiverRoastAgent:
         self.roast_sources: list[dict] = []
         self.last_prompt: str | None = None
         self.last_sources: list[dict[str, str]] = []
+        # One turn at a time per session: a turn runs in a worker thread and
+        # mutates the history. The dashboard lock keeps its Gemini summaries
+        # to one build per log.
+        self.turn_lock = asyncio.Lock()
+        self.dashboard_lock = asyncio.Lock()
 
     @property
     def client(self):
@@ -425,7 +431,8 @@ class DiverRoastAgent:
             ),
             using_attributes(session_id=str(id(self))),
         ):
-            text = self._run_turn(user_message, prompt_ver)
+            async with self.turn_lock:
+                text = await asyncio.to_thread(self._run_turn, user_message, prompt_ver)
             if text:
                 yield text
 
@@ -444,12 +451,17 @@ class DiverRoastAgent:
             ),
             using_attributes(session_id=str(id(self))),
         ):
-            history_snapshot = len(self.history)
-            try:
-                text = self._run_turn(user_message, prompt_ver)
-            except Exception:
-                self.history = self.history[:history_snapshot]
-                raise
+            async with self.turn_lock:
+                history_snapshot = len(self.history)
+                try:
+                    # Model calls and the DAN search block for seconds; in a
+                    # thread they don't stall every other request.
+                    text = await asyncio.to_thread(
+                        self._run_turn, user_message, prompt_ver
+                    )
+                except Exception:
+                    self.history = self.history[:history_snapshot]
+                    raise
             chunk_size = 20
             for i in range(0, len(text), chunk_size):
                 yield text[i : i + chunk_size]

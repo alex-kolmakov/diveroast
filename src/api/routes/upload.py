@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 from datetime import datetime
@@ -38,7 +39,9 @@ async def upload_dive_log(
         tmp_path = tmp.name
 
     try:
-        df = parser.parse(tmp_path)
+        # Parsing and feature extraction take seconds on a big log; in a
+        # thread they don't stall every other request.
+        df = await asyncio.to_thread(parser.parse, tmp_path)
     except Exception as e:
         raise HTTPException(
             status_code=400, detail=f"Failed to parse file: {str(e)}"
@@ -57,7 +60,7 @@ async def upload_dive_log(
         donation_path.write_bytes(content)
 
     sid, agent = get_or_create_session(session_id)
-    agent.set_dive_data(df)
+    await asyncio.to_thread(agent.set_dive_data, df)
     dive_numbers = agent.get_dive_numbers()
 
     return UploadResponse(

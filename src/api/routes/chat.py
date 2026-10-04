@@ -63,6 +63,10 @@ async def chat(
     if found is None:
         raise HTTPException(status_code=404, detail="Session not found")
     agent: DiverRoastAgent = found
+    if agent.turn_lock.locked():
+        raise HTTPException(
+            status_code=409, detail="Still answering your last message."
+        )
 
     async def event_generator():
         parts: list[str] = []
