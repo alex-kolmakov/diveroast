@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { UploadScreen } from "@/components/UploadScreen";
+import { PrivacyPage } from "@/components/PrivacyPage";
 import { AnalyzingScreen } from "@/components/AnalyzingScreen";
 import { Dashboard } from "@/components/Dashboard";
 import { ChatDrawer } from "@/components/ChatDrawer";
@@ -92,6 +93,14 @@ function App() {
     !sharedId && dashboardData?.share_id
       ? `${window.location.origin}/shared/${dashboardData.share_id}`
       : undefined;
+
+  if (window.location.pathname === "/privacy") {
+    return (
+      <div className="h-screen">
+        <PrivacyPage />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen">

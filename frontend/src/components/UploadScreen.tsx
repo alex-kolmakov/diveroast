@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Waves, Upload } from "lucide-react";
 import { uploadDiveLog } from "@/services/api";
+import { RETENTION_DAYS } from "@/lib/consent";
 import type { UploadResponse } from "@/types";
 
 interface Props {
@@ -104,7 +105,14 @@ export function UploadScreen({ onUploadComplete }: Props) {
           <span className="block text-xs">
             Buddy and divemaster names, notes, device serial numbers and body data
             are removed first. Dive profiles, dates, site names and GPS positions are
-            kept.
+            kept for {RETENTION_DAYS} days, and you get a code to delete it sooner.{" "}
+            <a
+              href="/privacy"
+              onClick={(e) => e.stopPropagation()}
+              className="text-primary underline underline-offset-2"
+            >
+              Privacy
+            </a>
           </span>
         </span>
       </label>
