@@ -487,3 +487,104 @@ async def test_health_reports_what_breaks_the_site(rows, disk, code, problem):
             "disk_free_mb": disk,
             "roasts_paused": False,
         }
+
+
+# --- Sentry -----------------------------------------------------------------
+
+
+@pytest.fixture
+def sentry_events(monkeypatch):
+    import sentry_sdk
+
+    from src import observability
+
+    events: list[dict] = []
+
+    class Capture(sentry_sdk.transport.Transport):
+        def capture_envelope(self, envelope):
+            for item in envelope.items:
+                payload = item.payload.json
+                if payload:
+                    events.append(payload)
+
+    monkeypatch.setattr(settings, "SENTRY_DSN", "https://key@o0.ingest.sentry.io/0")
+    assert observability.init_sentry(transport=Capture())
+    monkeypatch.setattr(observability, "_last_alert", {})
+    yield events
+    sentry_sdk.get_client().close()
+    sentry_sdk.init()  # back to a disabled client
+
+
+@pytest.mark.anyio
+async def test_sentry_reports_errors_without_dive_data(sentry_events):
+    import json
+
+    import sentry_sdk
+
+    sid, agent = deps.get_or_create_session()
+
+    # Built at runtime: Sentry sends nearby source lines (public code), so a
+    # literal here would show up; what must not show up is runtime data.
+    secret_roast = "-".join(["SECRET", "ROAST"])
+    secret_message = "-".join(["SECRET", "MESSAGE"])
+
+    def fail(message, prompt_ver):
+        roast_text = f"{secret_roast} Blue Hole 37.5 m"  # a local: must not be sent
+        raise RuntimeError("model blew up " + str(len(roast_text)))
+
+    transport = ASGITransport(app=app)
+    with (
+        patch.object(agent, "_run_turn", side_effect=fail),
+        patch("src.agent.conversation.get_active_prompt", return_value=PROMPT),
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/api/chat",
+                json={"message": f"{secret_message} my buddy Jane", "session_id": sid},
+            )
+    sentry_sdk.flush()
+    sent = json.dumps(sentry_events)
+    assert "model blew up" in sent  # the error itself is reported
+    assert secret_roast not in sent
+    assert secret_message not in sent
+    assert "Jane" not in sent
+
+
+def test_alerts_are_throttled(sentry_events):
+    import sentry_sdk
+
+    from src.observability import alert
+
+    for _ in range(5):
+        alert("Daily token budget spent", tokens=123)
+    alert("Model busy after retries")
+    sentry_sdk.flush()
+    messages = [
+        e.get("message") or e.get("logentry", {}).get("message") for e in sentry_events
+    ]
+    assert messages.count("Daily token budget spent") == 1
+    assert messages.count("Model busy after retries") == 1
+
+
+def test_sentry_is_off_without_a_dsn(monkeypatch):
+    from src import observability
+
+    monkeypatch.setattr(settings, "SENTRY_DSN", "")
+    assert observability.init_sentry() is False
+
+
+def test_phoenix_export_errors_do_not_reach_sentry(sentry_events):
+    import logging
+
+    import sentry_sdk
+
+    try:
+        raise ConnectionRefusedError("phoenix down")
+    except ConnectionRefusedError:
+        logging.getLogger("opentelemetry.sdk._shared_internal").exception(
+            "Exception while exporting Span."
+        )
+        logging.getLogger("src.agent.conversation").exception("Chat turn failed")
+    sentry_sdk.flush()
+    loggers = [e.get("logger") for e in sentry_events]
+    assert loggers == ["src.agent.conversation"]

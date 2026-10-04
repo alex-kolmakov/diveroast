@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # /health fails below this much free disk (snapshots, donations, logs)
     HEALTH_MIN_DISK_FREE_MB: int = 500
 
+    # Sentry error reports; off when the DSN is empty
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+
     # Phoenix
     PHOENIX_COLLECTOR_ENDPOINT: str = "http://localhost:6006/v1/traces"
     PHOENIX_CLIENT_ENDPOINT: str = "http://localhost:6006"

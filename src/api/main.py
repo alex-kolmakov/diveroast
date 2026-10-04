@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import admin, chat, dashboard, donations, health, shared, upload
 from src.config import settings
-from src.observability import init_tracing
+from src.observability import init_sentry, init_tracing
 from src.storage.retention import purge_forever
 
 # Libraries stay at WARNING; the app's own INFO lines (token usage per model
@@ -16,6 +16,9 @@ logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 logging.getLogger("src").setLevel(logging.INFO)
+
+# Before the app exists, so the FastAPI integration can hook in.
+init_sentry()
 
 
 @asynccontextmanager

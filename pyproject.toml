@@ -33,6 +33,7 @@ dependencies = [
     "arize-phoenix-otel>=0.6",
     "arize-phoenix-client>=1.0",
     "openinference-instrumentation-google-genai>=0.1",
+    "sentry-sdk[fastapi]>=2.0",
     # Embeddings
     "sentence-transformers>=3.1",
     # Direct dependency only so [tool.uv.sources] applies: CPU-only wheels on
