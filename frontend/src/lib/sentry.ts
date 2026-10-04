@@ -16,6 +16,8 @@ export function initSentry(): void {
   if (!dsn) return;
   Sentry.init({
     dsn,
+    // "development" on the dev server, "production" in a build
+    environment: import.meta.env.MODE,
     sendDefaultPii: false,
     tracesSampleRate: 0,
     beforeBreadcrumb(breadcrumb) {
