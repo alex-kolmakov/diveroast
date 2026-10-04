@@ -116,7 +116,8 @@ def _dive_names(row) -> list[str]:
 def _dive_line(row) -> str:
     site = str(row.get("dive_site_name", "N/A"))
     trip = str(row.get("trip_name", ""))
-    location = site if site and site != "N/A" else "unknown"
+    # Not "unknown": models echo it as a place ("at unknown").
+    location = site if site and site != "N/A" else "(no site name recorded)"
     if trip and trip != "N/A" and trip != site:
         location += f" ({trip})"
 
@@ -262,7 +263,8 @@ class DiverRoastAgent:
             f"dangerous dives. You can still call analyze_dive_profile or get_dive_summary "
             f"for deeper analysis of specific dives if needed, but you already have the key "
             f"metrics for every dive. Do NOT ask the user to upload — it's already done. "
-            f"When referencing dives, always use the site name, not just the number. "
+            f"When referencing dives, always use the site name, not just the number; "
+            f"a dive with no site name recorded is called by its number. "
             f"A metric missing from a dive's line was not recorded by the dive computer: "
             f"say so, never estimate it (ascent rates can't be measured on a dive "
             f"that stays in the top few metres). 'ascent' is the fastest 30-second sustained "

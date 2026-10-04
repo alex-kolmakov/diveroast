@@ -172,3 +172,13 @@ def test_proper_citations_and_other_links_are_untouched():
         "map [here](https://www.openstreetmap.org/x)."
     )
     assert repair_dan_links(text, SOURCES) == text
+
+
+def test_dive_without_a_site_is_not_called_unknown():
+    """Seen 2026-10-04: a FIT roast said "at unknown" three times."""
+    fit = "tests/fixtures/garmin_descent_scuba.fit"
+    agent = DiverRoastAgent()
+    agent.set_dive_data(get_parser(fit).parse(fit))
+    seed = agent.history[0].parts[0].text
+    assert "unknown:" not in seed
+    assert "(no site name recorded)" in seed
