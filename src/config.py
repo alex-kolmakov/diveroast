@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # nginx; anywhere the backend is reachable directly the header is forgeable.
     TRUST_PROXY_HEADERS: bool = False
 
+    # /health fails below this much free disk (snapshots, donations, logs)
+    HEALTH_MIN_DISK_FREE_MB: int = 500
+
     # Phoenix
     PHOENIX_COLLECTOR_ENDPOINT: str = "http://localhost:6006/v1/traces"
     PHOENIX_CLIENT_ENDPOINT: str = "http://localhost:6006"

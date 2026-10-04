@@ -35,6 +35,13 @@ services:
       - ./.dlt:/app/.dlt
       - diveroast-snapshots:/tmp/diveroast-snapshots
       - diveroast-donations:/tmp/diveroast-donations
+    healthcheck:
+      # /health fails on a missing or partial DAN index and a nearly full disk
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   frontend:

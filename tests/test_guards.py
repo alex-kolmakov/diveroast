@@ -448,3 +448,42 @@ async def test_internal_errors_are_not_sent_to_the_browser():
     secret = "GEMINI_API_KEY=abc123 at /app/src/agent/conversation.py"
     with patch.object(agent, "_run_turn", side_effect=RuntimeError(secret)):
         assert await _chat_error(agent, sid) == TURN_FAILED
+
+
+# --- Health -----------------------------------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("rows", "disk", "code", "problem"),
+    [
+        (17_852, 10_000, 200, None),
+        (None, 10_000, 503, "can't be opened"),
+        (322, 10_000, 503, "322 rows"),
+        (17_852, 100, 503, "disk free"),
+    ],
+)
+async def test_health_reports_what_breaks_the_site(rows, disk, code, problem):
+    from src.api.routes import health
+
+    health._dan_rows = (0.0, None)
+    transport = ASGITransport(app=app)
+    with (
+        patch.object(health, "_count_dan_rows", return_value=rows),
+        patch.object(health, "_disk_free_mb", return_value=disk),
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.get("/health")
+    assert r.status_code == code
+    body = r.json()
+    assert body["dan_rows"] == rows
+    if problem:
+        assert problem in " ".join(body["problems"])
+    else:
+        assert body == {
+            "status": "healthy",
+            "problems": [],
+            "dan_rows": rows,
+            "disk_free_mb": disk,
+            "roasts_paused": False,
+        }
