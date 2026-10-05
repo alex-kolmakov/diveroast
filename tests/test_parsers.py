@@ -38,6 +38,11 @@ def test_extract_all_dive_profiles_refined():
         "sac_rate",
         "latitude",
         "longitude",
+        "stop_depth",
+        "max_helium",
+        "gas_count",
+        "o2_spread",
+        "dive_mode",
     }
     assert len(df) == 37882, "Dataframe should have 37882 rows"
     assert df["depth"].iloc[200] == 4.7

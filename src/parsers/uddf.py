@@ -40,6 +40,11 @@ COLUMNS = [
     "sac_rate",
     "latitude",
     "longitude",
+    "stop_depth",
+    "max_helium",
+    "gas_count",
+    "o2_spread",
+    "dive_mode",
 ]
 
 
@@ -99,13 +104,53 @@ def _trips(root) -> dict[str, str]:
     return trips
 
 
+_DIVE_MODES = {"closedcircuit": "CCR", "semiclosedcircuit": "PSCR", "opencircuit": "OC"}
+
+
+def _mixes(root) -> dict[str, tuple[float, float]]:
+    """Gas mixes by id: (O2 %, He %). UDDF stores fractions."""
+    mixes = {}
+    for mix in _iter(root, "mix"):
+        o2 = _float(_child(mix, "o2"))
+        he = _float(_child(mix, "he"))
+        mixes[mix.get("id", "")] = (
+            (o2 if o2 is not None else 0.21) * 100,
+            (he or 0.0) * 100,
+        )
+    return mixes
+
+
+def _gas_profile(dive, mixes: dict[str, tuple[float, float]]) -> dict:
+    """Helium, gases breathed, O2 spread and breathing mode for one dive.
+
+    Gases breathed are the ``switchmix`` targets; a dive with none breathed
+    one gas, taken as the file's first mix.
+    """
+    switched = [
+        mixes[s.get("ref", "")]
+        for s in _iter(dive, "switchmix")
+        if s.get("ref") in mixes
+    ]
+    breathed = switched or list(mixes.values())[:1]
+    mode = next((m.get("type") for m in _iter(dive, "divemode")), None)
+    o2 = [b[0] for b in breathed]
+    return {
+        "max_helium": max((b[1] for b in breathed), default=None),
+        "gas_count": len(set(breathed)) if breathed else None,
+        "o2_spread": max(o2) - min(o2) if o2 else None,
+        "dive_mode": _DIVE_MODES.get(mode or "opencircuit", (mode or "OC").upper()),
+    }
+
+
 def _primary_tank(root) -> str | None:
     """The first tank referenced by any tankpressure reading."""
     first = next(_iter(root, "tankpressure"), None)
     return first.get("ref") if first is not None else None
 
 
-def _dive_rows(dive, sites, trips, primary_tank, fallback_number) -> list[dict]:
+def _dive_rows(
+    dive, sites, trips, primary_tank, fallback_number, mixes=None
+) -> list[dict]:
     before = _child(dive, "informationbeforedive")
     number = _text(_child(before, "divenumber")) if before is not None else None
     if number is None:
@@ -122,6 +167,7 @@ def _dive_rows(dive, sites, trips, primary_tank, fallback_number) -> list[dict]:
                 site = sites[link.get("ref")]
                 break
     trip = trips.get(dive.get("id", ""), "N/A")
+    gases = _gas_profile(dive, mixes or {})
 
     rows = []
     samples = _child(dive, "samples")
@@ -138,10 +184,12 @@ def _dive_rows(dive, sites, trips, primary_tank, fallback_number) -> list[dict]:
         )
         pressure_pa = _float(tank)
         ndl_s = _float(_child(wp, "nodecotime"))
-        deco = any(
-            stop.get("kind") == "mandatory" and float(stop.get("decodepth") or 0) > 0
+        stops = [
+            float(stop.get("decodepth") or 0)
             for stop in _children(wp, "decostop")
-        )
+            if stop.get("kind") == "mandatory"
+        ]
+        deco = any(depth_m > 0 for depth_m in stops)
         rows.append(
             {
                 "dive_number": number,
@@ -156,9 +204,12 @@ def _dive_rows(dive, sites, trips, primary_tank, fallback_number) -> list[dict]:
                 "rbt": None,
                 "ndl": ndl_s / 60 if ndl_s is not None else None,
                 "in_deco": int(deco),
+                # The deepest mandatory stop is the one owed first
+                "stop_depth": max(stops) if deco else None,
                 "sac_rate": None,
                 "latitude": site["latitude"],
                 "longitude": site["longitude"],
+                **gases,
             }
         )
     return rows
@@ -166,10 +217,11 @@ def _dive_rows(dive, sites, trips, primary_tank, fallback_number) -> list[dict]:
 
 def parse_uddf_root(root) -> pd.DataFrame:
     sites, trips, primary_tank = _sites(root), _trips(root), _primary_tank(root)
+    mixes = _mixes(root)
     rows: list[dict] = []
     seen: dict[str, int] = {}
     for i, dive in enumerate(_iter(root, "dive"), start=1):
-        dive_rows = _dive_rows(dive, sites, trips, primary_tank, f"unnum_{i}")
+        dive_rows = _dive_rows(dive, sites, trips, primary_tank, f"unnum_{i}", mixes)
         if not dive_rows:
             continue
         # Two dives sharing a number would merge into one; keep them apart.
@@ -181,7 +233,8 @@ def parse_uddf_root(root) -> pd.DataFrame:
         rows.extend(dive_rows)
     frame = pd.DataFrame(rows, columns=COLUMNS)
     numeric = ["time", "depth", "temperature", "pressure", "rbt", "ndl", "in_deco"]
-    numeric += ["sac_rate", "latitude", "longitude"]
+    numeric += ["sac_rate", "latitude", "longitude", "stop_depth", "max_helium"]
+    numeric += ["gas_count", "o2_spread"]
     frame[numeric] = frame[numeric].astype(float)
     return frame
 

@@ -14,12 +14,61 @@ def time_to_seconds(time_str):
     return float(time_str)
 
 
+def _percent(value: str | None) -> float | None:
+    """ "50.0%" -> 50.0; None when absent."""
+    if not value:
+        return None
+    try:
+        return float(value.strip().rstrip("%"))
+    except ValueError:
+        return None
+
+
+def gas_profile(dive) -> dict:
+    """What the dive was breathed on: helium, gases, O2 spread, breathing mode.
+
+    The first gaschange event (at 0:00) only sets the starting gas. Events
+    give the gas as an O2 value, or (older files) as ``value`` = O2 %, or
+    only as a cylinder index. ``o2_spread`` is the richest gas breathed minus
+    the leanest: a switch to a deco gas shows as a big spread, a re-set from
+    EAN28 to EAN29 doesn't. None when the dive lists no cylinders, no gas
+    events and no dive computer.
+    """
+    cylinders = dive.findall("cylinder")
+    cylinder_o2 = [_percent(c.get("o2")) or 21.0 for c in cylinders]
+    breathed: list[float] = []
+    for event in dive.iter("event"):
+        if event.get("name") != "gaschange":
+            continue
+        o2 = _percent(event.get("o2"))
+        if o2 is None and event.get("type") == "11":  # value is the O2 %
+            o2 = _percent(event.get("value"))
+        if o2 is None and event.get("cylinder", "").isdigit():
+            index = int(event.get("cylinder", ""))
+            o2 = cylinder_o2[index] if index < len(cylinder_o2) else None
+        if o2 is not None:
+            breathed.append(o2)
+    if not breathed and cylinder_o2:
+        breathed = cylinder_o2[:1]
+    computer = dive.find("divecomputer")
+    helium = [_percent(c.get("he")) or 0.0 for c in cylinders]
+    return {
+        "max_helium": max(helium) if helium else None,
+        "gas_count": len(set(breathed)) if breathed else None,
+        "o2_spread": max(breathed) - min(breathed) if breathed else None,
+        "dive_mode": (computer.get("dctype") or "OC").upper()
+        if computer is not None
+        else None,
+    }
+
+
 def extract_all_dive_profiles_refined(root):
     """Extract dive profiles for all dives from a Subsurface XML root element.
 
     Returns a DataFrame with per-sample rows containing dive_number, trip_name,
     dive_site_name, time, depth, temperature, pressure, rbt, ndl, in_deco,
-    sac_rate. Attributes the log does not record stay None. The diver's star
+    stop_depth, sac_rate, and per dive max_helium, gas_count, dive_mode.
+    Attributes the log does not record stay None. The diver's star
     rating is deliberately not read: most dive computer exports don't have one.
     """
     dive_data = []
@@ -67,6 +116,7 @@ def extract_all_dive_profiles_refined(root):
         longitude = site_info["longitude"]
 
         sac_rate = dive.attrib.get("sac", "N/A").replace(" l/min", "")
+        gases = gas_profile(dive)
         for sample in dive.findall(".//sample"):
             time = sample.attrib.get("time", "N/A").replace(" min", "")
             depth = sample.attrib.get("depth", "N/A").replace(" m", "")
@@ -94,6 +144,9 @@ def extract_all_dive_profiles_refined(root):
             # Subsurface writes in_deco only when it changes: '1' on entering
             # a deco obligation, '0' on clearing it.
             in_deco = sample.attrib.get("in_deco")
+            # The deco stop the computer is asking for, also written only
+            # when it changes.
+            stop_depth = sample.attrib.get("stopdepth")
 
             if time != "N/A" and depth != "N/A":
                 data_point = {
@@ -107,9 +160,13 @@ def extract_all_dive_profiles_refined(root):
                     "rbt": float(rbt) if rbt else None,
                     "ndl": float(ndl) if ndl else None,
                     "in_deco": int(in_deco) if in_deco is not None else None,
+                    "stop_depth": float(stop_depth.replace(" m", ""))
+                    if stop_depth
+                    else None,
                     "sac_rate": float(sac_rate) if sac_rate != "N/A" else None,
                     "latitude": latitude,
                     "longitude": longitude,
+                    **gases,
                 }
                 dive_data.append(data_point)
     return pd.DataFrame(dive_data)

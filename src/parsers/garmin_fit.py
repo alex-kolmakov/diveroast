@@ -32,6 +32,16 @@ SCUBA_SUB_SPORTS = {
     "gauge_diving",
     "ccr_diving",
 }
+# fitdecode's profile names older sub-sports but leaves newer ones as
+# numbers: Garmin rebreather dives arrive as 63.
+FIT_SUB_SPORT_NUMBERS = {
+    53: "single_gas_diving",
+    54: "multi_gas_diving",
+    55: "gauge_diving",
+    56: "apnea_diving",
+    57: "apnea_hunting",
+    63: "ccr_diving",
+}
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
 COLUMNS = [
@@ -48,6 +58,11 @@ COLUMNS = [
     "sac_rate",
     "latitude",
     "longitude",
+    "stop_depth",
+    "max_helium",
+    "gas_count",
+    "o2_spread",
+    "dive_mode",
 ]
 
 
@@ -78,6 +93,8 @@ def messages_to_frame(
     sport = (messages.get("sport") or [{}])[0]
     session = (messages.get("session") or [{}])[0]
     sub_sport = sport.get("sub_sport") or session.get("sub_sport")
+    if isinstance(sub_sport, int):
+        sub_sport = FIT_SUB_SPORT_NUMBERS.get(sub_sport, sub_sport)
     if sub_sport not in SCUBA_SUB_SPORTS:
         kind = sub_sport or sport.get("sport") or "unknown"
         raise NotAScubaDiveError(
@@ -126,6 +143,10 @@ def messages_to_frame(
                 for r in records
             ],
             "in_deco": [int((r.get("next_stop_depth") or 0) > 0) for r in records],
+            "stop_depth": [
+                float(r["next_stop_depth"]) if r.get("next_stop_depth") else None
+                for r in records
+            ],
         }
     )
 
@@ -162,11 +183,42 @@ def messages_to_frame(
         sac_rate=float(sac) if sac else None,
         latitude=lat,
         longitude=lon,
+        **_gas_profile(messages, sub_sport),
     )
     numeric = ["time", "depth", "temperature", "pressure", "rbt", "ndl", "in_deco"]
-    numeric += ["sac_rate", "latitude", "longitude"]
+    numeric += ["sac_rate", "latitude", "longitude", "stop_depth", "max_helium"]
+    numeric += ["gas_count", "o2_spread"]
     frame[numeric] = frame[numeric].astype(float)  # None -> NaN, like Subsurface
     return frame[COLUMNS]
+
+
+def _gas_profile(messages: dict[str, list[dict]], sub_sport) -> dict:
+    """Helium, gases breathed, O2 spread and breathing mode for one dive.
+
+    The dive starts on the first enabled gas; ``dive_gas_switched`` events
+    name the gas switched to by its index.
+    """
+    gases = {
+        g.get("message_index"): (
+            float(g.get("oxygen_content") or 21),
+            float(g.get("helium_content") or 0),
+        )
+        for g in messages.get("dive_gas", [])
+        if g.get("status") in (None, "enabled")
+    }
+    switched = [
+        gases[e.get("data")]
+        for e in messages.get("event", [])
+        if e.get("event") == "dive_gas_switched" and e.get("data") in gases
+    ]
+    breathed = list(gases.values())[:1] + switched
+    o2 = [b[0] for b in breathed]
+    return {
+        "max_helium": max((b[1] for b in breathed), default=None),
+        "gas_count": len(set(breathed)) if breathed else None,
+        "o2_spread": max(o2) - min(o2) if o2 else None,
+        "dive_mode": "CCR" if sub_sport == "ccr_diving" else "OC",
+    }
 
 
 class GarminFitParser(DiveLogParser):
