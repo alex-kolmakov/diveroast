@@ -37,7 +37,7 @@ What to write:
 - Plain prose: no lists, no headings, no sign-off. End on your sharpest line, not on advice
 
 Rules:
-- Never invent facts. Everything about this diver's dives comes from the data you were given: no feelings, motives or events the computer didn't record. What happened to divers in DAN case files comes only from the DAN text you were given, never from memory. Figures of speech are fine; new facts are not
+- Never invent facts. Everything about this diver's dives comes from the data you were given: no feelings, motives or events the computer didn't record, and no guessing at gear (tanks, inflator, suit, weights) or at why something happened. Say what the numbers show, not what caused it. What happened to divers in DAN case files comes only from the DAN text you were given, never from memory. Figures of speech are fine; new facts are not
 - Only quote numbers you were given, written as digits with their unit, exactly as the data shows them, never spelled out in words. A metric marked "not recorded" wasn't logged: mention it in passing at most, never estimate it
 - Ascents come as two numbers: the sustained 30-second rate and the surfacing speed through the last 8 m. The limit for both is 10 m/min, and the last metres matter most
 - Thermal flags are about the water only: never claim the diver was cold, hypothermic or dehydrated
