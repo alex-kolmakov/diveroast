@@ -126,7 +126,21 @@ def repair_dan_links(text: str, sources: list[dict[str, str]]) -> str:
         return f" ([DAN: {source['title']}]({source['url']}))"
 
     text = _SOURCE_NOTE.sub(fix_note, _OTHER_DAN_LINK.sub(fix_other, text))
-    return _DAN_LINK.sub(fix, text)
+    return _cite_once(_DAN_LINK.sub(fix, text))
+
+
+def _cite_once(text: str) -> str:
+    """Keep the first citation of each article; drop the repeats."""
+    seen: set[str] = set()
+
+    def first_only(match: re.Match) -> str:
+        url = match.group(2).rstrip("/")
+        if url in seen:
+            return ""
+        seen.add(url)
+        return match.group(0)
+
+    return _DAN_LINK.sub(first_only, text)
 
 
 def _hit_output_cap(response: types.GenerateContentResponse) -> bool:

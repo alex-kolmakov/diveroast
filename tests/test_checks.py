@@ -335,3 +335,15 @@ def test_unnumbered_dives_are_shown_by_date_not_internal_id():
     assert dive_label("unnum_2025-10-14_154315") == "2025-10-14 15:43"
     assert dive_label("unnum_2025-10-14") == "2025-10-14"
     assert dive_label("44") == "#44"
+
+
+def test_each_article_is_cited_once():
+    """Seen 2026-10-05: "Ascent Rates" cited twice in one roast."""
+    from src.agent.conversation import repair_dan_links
+
+    sources = [{"title": "Ascent Rates", "url": "https://dan.org/ascent-rates/"}]
+    link = "([DAN: Ascent Rates](https://dan.org/ascent-rates/))"
+    text = f"Bolting risks DCS {link}. Control matters most near the top {link}."
+    assert repair_dan_links(text, sources) == (
+        f"Bolting risks DCS {link}. Control matters most near the top."
+    )
