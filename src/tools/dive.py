@@ -193,8 +193,8 @@ def dive_issues(row) -> list[str]:
             f"{SHALLOW_ZONE_M:.0f} m was {row['max_shallow_ascend_speed']:.1f} m/min "
             f"(recommended: <{SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min), on {bolts} "
             f"surfacing(s). The relative pressure drop is largest in the last metres "
-            f"(8 m to the surface is 1.8 to 1.0 bar), so this is where a fast ascent "
-            f"matters most."
+            f"({SHALLOW_ZONE_M:.0f} m to the surface is {1 + SHALLOW_ZONE_M / 10:.1f} to "
+            f"1.0 bar), so leaving the safety stop is where a fast ascent matters most."
         )
     if row.get("entered_deco"):
         issues.append(

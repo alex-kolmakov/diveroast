@@ -52,7 +52,7 @@ export interface DiveFeature {
   sac_rate: number | null;
   max_ascend_speed: number | null; // null: too shallow to measure
   high_ascend_speed_count: number;
-  max_shallow_ascend_speed?: number | null; // fastest surfacing through the last 8 m
+  max_shallow_ascend_speed?: number | null; // fastest final ascent from the safety stop (last 5 m)
   shallow_bolt_count?: number;
   dive_site_name: string;
   trip_name: string;

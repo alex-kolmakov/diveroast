@@ -2,7 +2,7 @@
 export const METRICS = {
   depth: { name: "Max depth", qualifier: "" },
   sustained: { name: "Sustained ascent", qualifier: "30 s average" },
-  surfacing: { name: "Surfacing speed", qualifier: "last 8 m" },
+  surfacing: { name: "Surfacing speed", qualifier: "from the stop, last 5 m" },
   ndl: { name: "Min NDL", qualifier: "" },
   sac: { name: "SAC rate", qualifier: "" },
   temp: { name: "Temperature", qualifier: "" },

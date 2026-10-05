@@ -3,18 +3,18 @@ import pandas as pd
 
 # Ascent-rate metrics come in two tiers:
 #   sustained  - 30 s average over the whole dive (the 9-10 m/min guideline)
-#   surfacing  - speed of each final approach to the surface through the last
-#                8 m, where the relative pressure drop is largest (8 m ->
-#                surface is 1.8 -> 1.0 bar, a 44% drop). Short bolts from the
-#                safety stop are caught instead of being averaged away.
+#   surfacing  - speed of each final ascent from the safety stop: the last
+#                5 m, where the relative pressure drop is largest (5 m ->
+#                surface is 1.5 -> 1.0 bar, a 33% drop). Short bolts from the
+#                stop are caught instead of being averaged away.
 ASCENT_WINDOW_S = 30.0
 ASCENT_LIMIT_M_MIN = 10.0
 SHALLOW_THRESHOLD_M = 2.0  # sustained tier: sensor noise dominates shallower
-SHALLOW_ZONE_M = 8.0
+SHALLOW_ZONE_M = 5.0  # the safety stop: what comes after it is the surfacing
 SURFACE_M = 1.0  # shallower than this counts as at the surface
-# Depth marks the surfacing approach is timed from. The fastest wins, so a
-# stop at 5 m followed by a sprint from 4 m is timed from 4 m.
-SURFACING_MARKS_M = (SHALLOW_ZONE_M, 6.0, 5.0, 4.0, 3.0)
+# Depth marks the surfacing is timed from. The fastest wins, so a stop at
+# 5 m followed by a sprint from 4 m is timed from 4 m.
+SURFACING_MARKS_M = (SHALLOW_ZONE_M, 4.0, 3.0)
 SHALLOW_ASCENT_LIMIT_M_MIN = 10.0
 
 # Thermal exposure. Logs record water temperature, not body temperature or
@@ -190,7 +190,7 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     episodes above ``ASCENT_LIMIT_M_MIN``.
 
     Surfacing: ``max_shallow_ascend_speed`` is the fastest approach to the
-    surface through the last ``SHALLOW_ZONE_M``; ``shallow_bolt_count`` is
+    surface from the safety stop (the last ``SHALLOW_ZONE_M``); ``shallow_bolt_count`` is
     the number of surfacings faster than ``SHALLOW_ASCENT_LIMIT_M_MIN``.
 
     Counts are episodes or surfacings, not samples, so they don't scale with

@@ -11,6 +11,7 @@ from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import generate, get_client
 from src.agent.usage import daily_budget, record_usage
 from src.analysis.feature_engineering import (
+    SHALLOW_ZONE_M,
     ascent_events,
     data_coverage,
     extract_features,
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 THRESHOLDS = {
     "max_depth": ("Max Depth", "m", 18.0, 30.0),
     "max_ascend_speed": ("Max Sustained Ascent (30 s)", "m/min", 9.0, 10.0),
-    "max_shallow_ascend_speed": ("Fastest Surfacing (last 8 m)", "m/min", 9.0, 10.0),
+    "max_shallow_ascend_speed": ("Fastest Surfacing (last 5 m)", "m/min", 9.0, 10.0),
     "min_ndl": ("Min NDL", "min", None, None),  # inverted: lower is worse
     "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0),
     "avg_temp": ("Avg Temperature", "\u00b0C", None, None),  # informational
@@ -233,7 +234,7 @@ def _compute_danger_score(row) -> float:
     elif ascent > 9:
         score += 2.0
 
-    # Surfacing speed through the last 8 m (weight 2): the largest relative
+    # Surfacing speed from the safety stop (weight 2): the largest relative
     # pressure change, so a bolt counts as much as a sustained fast ascent.
     surfacing = row.get("max_shallow_ascend_speed", 0)
     if surfacing > 15:
@@ -316,7 +317,7 @@ def _generate_dive_summaries(
             f"(30 s average), "
             f"fastest_surfacing="
             f"{fmt(d['stats'].get('max_shallow_ascend_speed'), unit=' m/min')} "
-            f"(through the last 8 m), "
+            f"(from the safety stop, the last {SHALLOW_ZONE_M:.0f} m), "
             f"entered_deco={'yes' if d['stats'].get('entered_deco') else 'no'}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
             f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "

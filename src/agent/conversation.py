@@ -21,7 +21,11 @@ from src.agent.gemini_client import generate, get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
-from src.analysis.feature_engineering import COLD_WATER_C, extract_features
+from src.analysis.feature_engineering import (
+    COLD_WATER_C,
+    SHALLOW_ZONE_M,
+    extract_features,
+)
 from src.config import settings
 from src.observability import get_tracer
 from src.rag.search import Retrieval
@@ -285,7 +289,8 @@ class DiverRoastAgent:
             f"fastest ascent {fmt(features_df['max_ascend_speed'].max(), unit=' m/min')} "
             f"(30 s sustained), "
             f"{int((features_df['max_shallow_ascend_speed'] > 10).sum())} dives bolted "
-            f"to the surface (>10 m/min through the last 8 m), "
+            f"to the surface (>10 m/min from the safety stop, the last "
+            f"{SHALLOW_ZONE_M:.0f} m), "
             f"lowest NDL {fmt(ndl.min(), '.0f', ' min')}, "
             f"{int(features_df['entered_deco'].sum())} dives entered deco | "
             f"temperature exposure: {temp_exposure_str}, "
@@ -321,8 +326,9 @@ class DiverRoastAgent:
             f"A metric missing from a dive's line was not recorded by the dive computer: "
             f"say so, never estimate it (ascent rates can't be measured on a dive "
             f"that stays in the top few metres). 'ascent' is the fastest 30-second sustained "
-            f"ascent rate; 'surfacing' is the fastest approach to the surface through "
-            f"the last 8 m, where the pressure change is largest. Both limits are "
+            f"ascent rate; 'surfacing' is the fastest final ascent from the safety "
+            f"stop (the last {SHALLOW_ZONE_M:.0f} m), where the pressure change is "
+            f"largest. Both limits are "
             f"10 m/min. Thermal flags come from water temperature only (not the "
             f"suit or the diver's body): PROLONGED COLD is {PROLONGED_COLD_MIN:.0f}+ min "
             f"below {COLD_WATER_C:.0f}°C (hypothermia risk), COLD STOPS means the ascent "

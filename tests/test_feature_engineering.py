@@ -1,5 +1,6 @@
 import xml.etree.ElementTree as ET
 
+import numpy as np
 import pandas as pd
 
 from src.analysis.feature_engineering import (
@@ -182,3 +183,46 @@ def test_ndl_zero_after_a_gap_in_readings_counts_if_counting_down():
         {"dive_number": [1] * 4, "time": [0, 10, 20, 30], "ndl": [2, None, None, 0]}
     )
     assert clean_ndl(data).tolist()[-1] == 0
+
+
+def _ascent(*legs: tuple[float, float]) -> pd.DataFrame:
+    """10 min at 20 m, then (to_depth, m/min) legs, or (depth, -seconds) to
+    hold a depth. 2 s samples."""
+    points = [(0.0, 20.0), (600.0, 20.0)]
+    for depth, rate in legs:
+        t, d = points[-1]
+        points.append(
+            (t - rate, d) if rate < 0 else (t + (d - depth) / rate * 60, depth)
+        )
+    times = np.arange(0, points[-1][0] + 1, 2.0)
+    depth = np.interp(times, [p[0] for p in points], [p[1] for p in points])
+    return pd.DataFrame(
+        {
+            "dive_number": "1",
+            "time": times,
+            "depth": depth,
+            "temperature": np.nan,
+            "pressure": np.nan,
+            "ndl": np.nan,
+            "sac_rate": np.nan,
+        }
+    )
+
+
+def _surfacing(*legs) -> tuple[float, int]:
+    row = extract_features(_ascent(*legs)).iloc[0]
+    return row["max_shallow_ascend_speed"], row["shallow_bolt_count"]
+
+
+def test_surfacing_is_the_ascent_from_the_safety_stop():
+    """Surfacing speed is timed from 5 m, the stop, not from 8 m (2026-10-05).
+
+    12 m/min from 8 to 5 m then 9 m/min to the surface was a bolt when timed
+    from 8 m (7 m in 41.7 s = 10.1 m/min); the stretch above the stop is now
+    what counts, and 8 to 5 m belongs to the sustained tier.
+    """
+    speed, bolts = _surfacing((8, 6), (5, 12), (0, 9))
+    assert speed < 10 and bolts == 0
+
+    speed, bolts = _surfacing((5, 6), (5, -180), (0, 20))  # stop, then sprint
+    assert speed > 10 and bolts == 1
