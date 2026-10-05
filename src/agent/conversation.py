@@ -33,6 +33,7 @@ from src.tools.dive import (
     anomaly_queries,
     build_anomaly_keywords,
     coverage_line,
+    dive_label,
     fmt,
     measured,
     thermal_flags,
@@ -133,7 +134,11 @@ def _hit_output_cap(response: types.GenerateContentResponse) -> bool:
 
 def _dive_names(row) -> list[str]:
     """How an answer can refer to a dive: site (and its short form), trip, number."""
-    names = [f"#{row['dive_number']}", f"dive {row['dive_number']}"]
+    names = [
+        f"#{row['dive_number']}",
+        f"dive {row['dive_number']}",
+        dive_label(row["dive_number"]),
+    ]
     for key in ("dive_site_name", "trip_name"):
         name = str(row.get(key) or "").strip()
         if not name or name == "N/A":
@@ -183,7 +188,7 @@ def _dive_line(row) -> str:
         parts.append(
             f"LONG WARM DIVE (water never below {row['water_min_temp']:.1f}°C)"
         )
-    return f"  #{row['dive_number']} {location}: " + ", ".join(parts)
+    return f"  {dive_label(row['dive_number'])} {location}: " + ", ".join(parts)
 
 
 class DiverRoastAgent:

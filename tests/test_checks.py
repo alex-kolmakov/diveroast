@@ -326,3 +326,12 @@ def test_source_texts_are_read_from_the_material_the_model_saw():
     texts = source_texts(material)
     assert texts[INFLATOR.rstrip("/")] == "A mild headache.\nIt resolved."
     assert "skin rash" in texts[MISSED_DECO.rstrip("/")]
+
+
+def test_unnumbered_dives_are_shown_by_date_not_internal_id():
+    """Seen 2026-10-05: a roast quoted "#unnum_2025-10-14_154315"."""
+    from src.tools.dive import dive_label
+
+    assert dive_label("unnum_2025-10-14_154315") == "2025-10-14 15:43"
+    assert dive_label("unnum_2025-10-14") == "2025-10-14"
+    assert dive_label("44") == "#44"

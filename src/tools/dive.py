@@ -69,6 +69,22 @@ def fmt(value, spec: str = ".1f", unit: str = "") -> str:
     return f"{float(value):{spec}}{unit}"
 
 
+_UNNUMBERED = re.compile(r"^unnum_(\d{4}-\d{2}-\d{2})_?(\d{2})?:?(\d{2})?")
+
+
+def dive_label(dive_number) -> str:
+    """How a dive is shown to the model: "#12", or its date and time.
+
+    Dives the computer didn't number get an internal id ("unnum_2025-10-14_
+    154315"); shown as is, models quote it in the roast.
+    """
+    match = _UNNUMBERED.match(str(dive_number))
+    if not match:
+        return f"#{dive_number}"
+    date, hour, minute = match.groups()
+    return f"{date} {hour}:{minute}" if hour and minute else date
+
+
 def dive_sort_key(dive_number) -> tuple:
     """Numbered dives in numeric order, then unnumbered ones by date/time."""
     s = str(dive_number)
