@@ -270,3 +270,59 @@ def test_a_dive_named_earlier_in_the_paragraph_counts():
     split = "Take Nura reef.\n\nYou hit 23.4 m/min there."
     _, report = check_and_strip(split, REAL_FACTS, is_roast=False)
     assert report.ungrounded == ["23.4 m/min"]
+
+
+# --- Outcomes pinned on DAN ---------------------------------------------------
+
+INFLATOR = "https://dan.org/case-summaries/inflator/"
+MISSED_DECO = "https://dan.org/case-summaries/two-missed-deco-alerts/"
+CASE_TEXTS = {
+    INFLATOR: "A diver ascended rapidly when the BCD inflator fired. The next day "
+    "she reported a mild headache, which resolved.",
+    MISSED_DECO: "One diver began to exhibit a skin rash related to decompression "
+    "sickness and called the DAN hotline.",
+}
+
+
+def _cited(*dives, sources=CASE_TEXTS) -> Grounding:
+    return Grounding(general="", dives=list(dives), sources=sources)
+
+
+def test_invented_injury_cited_to_dan_is_stripped():
+    """The locked-in example, 2026-10-05: a mild headache became seizures."""
+    text = (
+        "You sprinted the last metres like an amateur. I have read this exact "
+        "profile in case files where the diver surfaces seizing or coughing blood "
+        f"([DAN: Inflator Malfunction]({INFLATOR}))."
+    )
+    cleaned, report = check_and_strip(text, _cited(), is_roast=False)
+    assert report.misattributed == ["lung injury", "neurological harm"]
+    assert cleaned == "You sprinted the last metres like an amateur."
+
+
+def test_outcome_the_article_does_say_is_kept_in_any_wording():
+    text = (
+        "A buddy pair rode their NDLs the same way and one went home bent "
+        f"([DAN: Two Missed Deco Alerts]({MISSED_DECO}))."
+    )
+    cleaned, report = check_and_strip(text, _cited(), is_roast=False)
+    assert report.misattributed == [] and cleaned == text
+
+
+def test_uncited_figures_of_speech_are_left_alone():
+    text = "Keep diving like that and the chamber crew will learn your name."
+    cleaned, report = check_and_strip(text, _cited(), is_roast=False)
+    assert report.misattributed == [] and cleaned == text
+
+
+def test_source_texts_are_read_from_the_material_the_model_saw():
+    from src.agent.checks import source_texts
+
+    material = (
+        f"[Source: Inflator Malfunction]({INFLATOR})\nA mild headache.\n\n"
+        f"[Source: Inflator Malfunction]({INFLATOR})\nIt resolved.\n\n"
+        f"[Source: Two Missed Deco Alerts]({MISSED_DECO})\nA skin rash."
+    )
+    texts = source_texts(material)
+    assert texts[INFLATOR.rstrip("/")] == "A mild headache.\nIt resolved."
+    assert "skin rash" in texts[MISSED_DECO.rstrip("/")]

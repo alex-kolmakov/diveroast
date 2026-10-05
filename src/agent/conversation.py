@@ -10,7 +10,13 @@ import pandas as pd
 from google.genai import types
 from openinference.instrumentation import using_attributes
 
-from src.agent.checks import DiveFacts, Grounding, Report, check_and_strip
+from src.agent.checks import (
+    DiveFacts,
+    Grounding,
+    Report,
+    check_and_strip,
+    source_texts,
+)
 from src.agent.gemini_client import generate, get_client
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
@@ -420,7 +426,10 @@ class DiverRoastAgent:
                     texts.append(part.text)
                 elif part.function_response is not None:
                     texts.append(str(part.function_response.response))
-        return Grounding(general="\n".join(texts), dives=self.dive_facts)
+        general = "\n".join(texts)
+        return Grounding(
+            general=general, dives=self.dive_facts, sources=source_texts(general)
+        )
 
     def _guard(self, text: str, prompt_ver: PromptVersion, material: str) -> str:
         """Drop sentences quoting numbers the model wasn't given; count all

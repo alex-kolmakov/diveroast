@@ -31,6 +31,25 @@ _BANNED = re.compile(
     re.IGNORECASE,
 )
 _DAN_LINK = re.compile(r"\[DAN: [^\]]+\]\([^)]+\)")
+_DAN_LINK_URL = re.compile(r"\[DAN: [^\]]+\]\(([^)\s]+)\)")
+# A retrieved chunk as the model saw it: "[Source: Title](url)\ntext"
+_SOURCE_CHUNK = re.compile(
+    r"\[Source: [^\]]*\]\(([^)\s]+)\)\n(.*?)(?=\n\n\[Source: |\Z)", re.S
+)
+
+# Injuries and outcomes, by concept. A cited sentence may only claim an
+# outcome the cited article's retrieved text mentions in some form ("bent"
+# is backed by "decompression sickness"); otherwise the roast is pinning an
+# invented injury on DAN.
+OUTCOMES = {
+    "decompression sickness": r"\bdcs\b|decompression (?:sickness|illness)|\bbent\b|\bbends\b|\bdci\b",
+    "gas embolism": r"embolism|\bage\b",
+    "lung injury": r"lung (?:over|injur|barotrauma)|pneumothorax|cough\w* (?:up )?blood|bloody froth",
+    "neurological harm": r"seiz\w*|convuls\w*|paraly\w*|numb\w*|stroke|unconscious\w*|\bcoma\b",
+    "death": r"\bdeath\b|\bdied\b|\bdead\b|fatal\w*|drown\w*|\bkilled\b",
+    "treatment": r"chamber|recompress\w*|hyperbaric|hospital\w*|evacuat\w*|airlift\w*",
+    "skin": r"\brash\b|skin (?:bend|dcs|mottl\w*)",
+}
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\[*\"'])")
 
 
@@ -55,6 +74,8 @@ class Grounding:
 
     general: str  # prompt, log-wide aggregates, DAN material, tool output, the message
     dives: list[DiveFacts] = field(default_factory=list)
+    # url -> the retrieved text of that DAN article, as the model saw it
+    sources: dict[str, str] = field(default_factory=dict)
 
     def values_for(self, sentence: str) -> list[float]:
         lowered = sentence.lower()
@@ -67,17 +88,44 @@ class Grounding:
         return grounded_values(self.general + "\n" + "\n".join(d.line for d in named))
 
 
+def source_texts(text: str) -> dict[str, str]:
+    """Retrieved DAN chunks in ``text``, joined per article URL."""
+    found: dict[str, list[str]] = {}
+    for url, chunk in _SOURCE_CHUNK.findall(text):
+        found.setdefault(url.rstrip("/"), []).append(chunk)
+    return {url: "\n".join(chunks) for url, chunks in found.items()}
+
+
+def outcomes_in(text: str) -> set[str]:
+    lowered = text.lower()
+    return {name for name, pattern in OUTCOMES.items() if re.search(pattern, lowered)}
+
+
+def unsupported_outcomes(sentence: str, sources: dict[str, str]) -> list[str]:
+    """Outcomes a cited sentence claims that none of its cited articles mention."""
+    urls = [u.rstrip("/") for u in _DAN_LINK_URL.findall(sentence)]
+    if not urls:
+        return []
+    claimed = outcomes_in(_DAN_LINK.sub("", sentence))
+    by_url = {url.rstrip("/"): text for url, text in sources.items()}
+    backed: set[str] = set()
+    for url in urls:
+        backed |= outcomes_in(by_url.get(url, ""))
+    return sorted(claimed - backed)
+
+
 @dataclass
 class Report:
     stripped: list[str] = field(default_factory=list)  # removed sentences
     ungrounded: list[str] = field(default_factory=list)  # e.g. "23.4 m/min"
+    misattributed: list[str] = field(default_factory=list)  # outcomes DAN didn't say
     banned: list[str] = field(default_factory=list)
     dan_without_link: bool = False
     format_issues: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
-        return not self.ungrounded
+        return not self.ungrounded and not self.misattributed
 
 
 def _decimals(s: str) -> int:
@@ -131,8 +179,10 @@ def check_and_strip(
             # "Take Deadalus. You cruised 68 minutes..." is about Deadalus.
             scope = " ".join(sentences[: i + 1])
             bad = ungrounded_measures(sentence, grounding.values_for(scope))
-            if bad:
+            invented = unsupported_outcomes(sentence, grounding.sources)
+            if bad or invented:
                 report.ungrounded.extend(bad)
+                report.misattributed.extend(invented)
                 report.stripped.append(sentence)
             else:
                 kept.append(sentence)

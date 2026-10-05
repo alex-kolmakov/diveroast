@@ -102,10 +102,11 @@ def record_check(report) -> None:
         or report.format_issues
     ):
         logger.info(
-            "answer check: %d sentences stripped %s, banned %s, DAN unlinked %s, "
-            "format %s",
+            "answer check: %d sentences stripped (numbers %s, outcomes %s), "
+            "banned %s, DAN unlinked %s, format %s",
             len(report.stripped),
             report.ungrounded,
+            report.misattributed,
             report.banned,
             report.dan_without_link,
             report.format_issues,
@@ -113,6 +114,7 @@ def record_check(report) -> None:
     span = trace.get_current_span()
     span.set_attribute("diveroast.check.stripped", len(report.stripped))
     span.set_attribute("diveroast.check.ungrounded", report.ungrounded)
+    span.set_attribute("diveroast.check.misattributed", report.misattributed)
     span.set_attribute("diveroast.check.banned", report.banned)
     span.set_attribute("diveroast.check.dan_without_link", report.dan_without_link)
     span.set_attribute("diveroast.check.format", report.format_issues)
