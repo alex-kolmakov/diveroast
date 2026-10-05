@@ -258,3 +258,15 @@ def test_plain_text_source_note_becomes_a_citation():
     )
     unknown = "Trust me (Source: Something Invented)."
     assert repair_dan_links(unknown, sources) == "Trust me."
+
+
+def test_a_dive_named_earlier_in_the_paragraph_counts():
+    """Seen 2026-10-05: a true sentence stripped because its dive was named
+    in the sentence before."""
+    text = "Take Nura reef. You hit 40.5 m there and lingered."
+    cleaned, report = check_and_strip(text, REAL_FACTS, is_roast=False)
+    assert report.ungrounded == [] and cleaned == text
+    # ...but not across paragraphs
+    split = "Take Nura reef.\n\nYou hit 23.4 m/min there."
+    _, report = check_and_strip(split, REAL_FACTS, is_roast=False)
+    assert report.ungrounded == ["23.4 m/min"]

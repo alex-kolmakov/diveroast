@@ -126,8 +126,11 @@ def check_and_strip(
         lead = prefix.group(0) if prefix else ""
         sentences = _SENTENCE_END.split(line[len(lead) :])
         kept = []
-        for sentence in sentences:
-            bad = ungrounded_measures(sentence, grounding.values_for(sentence))
+        for i, sentence in enumerate(sentences):
+            # A dive named earlier in the paragraph is still the subject:
+            # "Take Deadalus. You cruised 68 minutes..." is about Deadalus.
+            scope = " ".join(sentences[: i + 1])
+            bad = ungrounded_measures(sentence, grounding.values_for(scope))
             if bad:
                 report.ungrounded.extend(bad)
                 report.stripped.append(sentence)
