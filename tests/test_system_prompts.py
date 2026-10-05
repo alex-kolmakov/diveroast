@@ -105,9 +105,9 @@ def test_prompt_is_prose_with_incidents_and_no_numbers_to_copy():
     import re
 
     text = LOCAL_PROMPT.prompt
-    assert "Prose only" in text and "bullet list" not in text
-    assert "Fix it" not in text
-    assert "DAN incident reports" in text
+    assert "no lists" in text and "Fix it" not in text
+    assert "incident report" in text
+    assert "Never invent facts" in text
     # Examples get copied, and a number in the prompt counts as grounded
     # for the answer guard: no measured-looking values in the prompt.
     assert not re.search(r"\d+\.\d+ ?m/min", text)
