@@ -31,7 +31,7 @@ from src.api.models import (
 )
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
-from src.tools.dive import dive_issues, fmt, measured, thermal_flags
+from src.tools.dive import deco_flags, dive_issues, fmt, measured, thermal_flags
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -219,10 +219,16 @@ def _compute_danger_score(row) -> float:
     Unrecorded metrics contribute nothing.
     """
     score = 0.0
-    # NDL: lower is worse (weight 3). A computer-flagged deco entry is the
-    # worst case.
+    # Deco (weight 3). Missing a required stop, or surfacing with one owed,
+    # is the worst case on any dive. A technical dive plans its deco, so
+    # deco entry and low NDL only count on a recreational dive.
+    deco = deco_flags(row)
     ndl = row.get("min_ndl")
-    if row.get("entered_deco") or (measured(ndl) and ndl < NDL_WARNING_LOWER):
+    if deco["missed_stop"] or deco["surfaced_owing"]:
+        score += 3.0 * 3
+    elif deco["technical"]:
+        pass
+    elif row.get("entered_deco") or (measured(ndl) and ndl < NDL_WARNING_LOWER):
         score += 3.0 * 2
     elif measured(ndl) and ndl < NDL_SAFE_LOWER:
         score += 3.0
@@ -266,7 +272,14 @@ def _identify_issues(row) -> list[str]:
     if row.get("max_shallow_ascend_speed", 0) > 10:
         issues.append("bolted to surface")
     ndl = row.get("min_ndl")
-    if row.get("entered_deco") or (measured(ndl) and ndl < NDL_SAFE_LOWER):
+    deco = deco_flags(row)
+    if deco["missed_stop"]:
+        issues.append("missed deco stop")
+    if deco["surfaced_owing"]:
+        issues.append("surfaced owing deco")
+    if not deco["technical"] and (
+        row.get("entered_deco") or (measured(ndl) and ndl < NDL_SAFE_LOWER)
+    ):
         issues.append("low NDL")
     sac = row.get("sac_rate")
     if measured(sac) and sac > 15:
@@ -281,6 +294,21 @@ def _identify_issues(row) -> list[str]:
     if flags["long_warm"]:
         issues.append("long warm dive")
     return issues
+
+
+def _deco_summary(stats) -> str:
+    """Deco as the summary jabs should see it: planned on a technical dive."""
+    deco = deco_flags(stats)
+    if not stats.get("entered_deco"):
+        return "entered_deco=no"
+    kind = "planned (technical dive)" if deco["technical"] else "recreational dive"
+    if deco["missed_stop"] or deco["surfaced_owing"]:
+        kept = "MISSED a required stop"
+    elif deco["stops_kept"]:
+        kept = "all stops kept"
+    else:
+        kept = "stops not recorded"
+    return f"entered_deco=yes, {kind}, {kept}"
 
 
 def _generate_dive_summaries(
@@ -318,7 +346,7 @@ def _generate_dive_summaries(
             f"fastest_surfacing="
             f"{fmt(d['stats'].get('max_shallow_ascend_speed'), unit=' m/min')} "
             f"(from the safety stop, the last {SHALLOW_ZONE_M:.0f} m), "
-            f"entered_deco={'yes' if d['stats'].get('entered_deco') else 'no'}, "
+            f"{_deco_summary(d['stats'])}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
             f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "
             f"avg_temp={fmt(d['stats'].get('avg_temp'), unit='°C')}, "
@@ -523,8 +551,11 @@ def _build_dashboard(
     """Compute the dashboard for the session's log (blocking: runs in a thread)."""
     features_df = extract_features(dive_data)
     # Rank key for the "low NDL" pick: a deco entry is worse than any NDL.
-    features_df["ndl_rank"] = features_df["min_ndl"].where(
-        ~features_df["entered_deco"], -1.0
+    # Technical dives plan their deco, so they're left out of this pick.
+    features_df["ndl_rank"] = (
+        features_df["min_ndl"]
+        .where(~features_df["entered_deco"], -1.0)
+        .where(~features_df["technical"])
     )
 
     # Build per-dive features list
@@ -552,6 +583,11 @@ def _build_dashboard(
                 pressure_variability=_r(row["pressure_variability"]),
                 min_ndl=_r(row["min_ndl"]),
                 entered_deco=bool(row["entered_deco"]),
+                technical=bool(row["technical"]),
+                tech_reason=str(row["tech_reason"]) or None,
+                deco_minutes=_r(row["deco_minutes"], 1),
+                missed_stop_minutes=_r(row["missed_stop_minutes"], 1),
+                surfaced_owing=_r(row["surfaced_owing"], 1),
                 sac_rate=_r(row["sac_rate"]),
                 max_ascend_speed=_r(row["max_ascend_speed"]),
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),

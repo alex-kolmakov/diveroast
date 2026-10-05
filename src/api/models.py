@@ -70,6 +70,13 @@ class DiveFeature(BaseModel):
     water_min_temp: float | None = None
     cold_minutes: float | None = None
     stop_temp: float | None = None
+    # Deco: a technical dive (trimix, deco gas, rebreather) plans its deco;
+    # missed stops and surfacing owing count on any dive. None = not recorded.
+    technical: bool = False
+    tech_reason: str | None = None
+    deco_minutes: float | None = None
+    missed_stop_minutes: float | None = None
+    surfaced_owing: float | None = None  # stop depth still owed at the surface
     dive_site_name: str
     trip_name: str
     latitude: float | None

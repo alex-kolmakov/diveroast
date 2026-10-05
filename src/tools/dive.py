@@ -34,6 +34,37 @@ WARM_WATER_C = 29.0  # coldest in-water reading at or above this: warm dive
 LONG_WARM_MIN = 60.0  # ...for this long: dehydration, a DCS factor
 
 
+# Underwater time above a required stop shorter than this is sensor noise or
+# waves, not a missed stop.
+MISSED_STOP_MIN = 0.5
+
+
+def deco_flags(row) -> dict[str, bool]:
+    """How a dive's deco should be judged.
+
+    A technical dive (trimix, deco gas, rebreather) plans its deco, so deco
+    entry is only an issue on a recreational dive. Missing a required stop,
+    or surfacing with one still owed, is serious on any dive. Unrecorded
+    stop depths never raise a flag.
+    """
+    technical = bool(row.get("technical"))
+    missed = row.get("missed_stop_minutes")
+    owing = row.get("surfaced_owing")
+    missed_stop = measured(missed) and missed >= MISSED_STOP_MIN
+    surfaced_owing = measured(owing) and owing > 0
+    entered = bool(row.get("entered_deco"))
+    return {
+        "technical": technical,
+        "recreational_deco": entered and not technical,
+        "missed_stop": missed_stop,
+        "surfaced_owing": surfaced_owing,
+        "stops_kept": entered
+        and measured(missed)
+        and not missed_stop
+        and not surfaced_owing,
+    }
+
+
 def thermal_flags(row) -> dict[str, bool]:
     """Which thermal risks the measured data supports for one dive.
 
@@ -162,8 +193,21 @@ def describe_features(row) -> str:
         parts.append(
             f"water during ascent and stops {fmt(row['stop_temp'], unit=' °C')}"
         )
+    if row.get("technical"):
+        parts.append(f"technical dive ({row.get('tech_reason')})")
     if row.get("entered_deco"):
-        parts.append("entered decompression")
+        parts.append(f"decompression {fmt(row.get('deco_minutes'), '.0f', ' min')}")
+        deco = deco_flags(row)
+        if deco["stops_kept"]:
+            parts.append("all required stops kept")
+        if deco["missed_stop"]:
+            parts.append(
+                f"{fmt(row['missed_stop_minutes'], unit=' min')} above a required stop"
+            )
+        if deco["surfaced_owing"]:
+            parts.append(
+                f"surfaced with a {row['surfaced_owing']:.0f} m stop still owed"
+            )
     return ", ".join(parts) + "."
 
 
@@ -196,12 +240,37 @@ def dive_issues(row) -> list[str]:
             f"({SHALLOW_ZONE_M:.0f} m to the surface is {1 + SHALLOW_ZONE_M / 10:.1f} to "
             f"1.0 bar), so leaving the safety stop is where a fast ascent matters most."
         )
-    if row.get("entered_deco"):
+    deco = deco_flags(row)
+    if deco["surfaced_owing"]:
         issues.append(
-            "ENTERED DECOMPRESSION: the dive computer flagged a mandatory "
-            "decompression obligation on this dive."
+            f"SURFACED WITH DECO OWED: the computer still showed a "
+            f"{row['surfaced_owing']:.0f} m stop at the surface. Skipping a required "
+            f"stop is a direct DCS risk."
         )
-    elif measured(row.get("min_ndl")) and row["min_ndl"] < NDL_DANGER_MIN:
+    if deco["missed_stop"]:
+        issues.append(
+            f"MISSED DECO STOP: {row['missed_stop_minutes']:.1f} min underwater above "
+            f"the stop the computer required, up to {row['max_above_stop']:.1f} m "
+            f"above it."
+        )
+    if deco["recreational_deco"]:
+        kept = (
+            " The required stops were kept."
+            if deco["stops_kept"]
+            else ""
+            if measured(row.get("missed_stop_minutes"))
+            else " Stop depths weren't recorded, so whether the stops were kept is unknown."
+        )
+        issues.append(
+            f"ENTERED DECOMPRESSION on a recreational dive (no helium, deco gas or "
+            f"rebreather in the log): {fmt(row.get('deco_minutes'), '.0f', ' min')} "
+            f"of deco obligation.{kept}"
+        )
+    elif (
+        not row.get("entered_deco")
+        and measured(row.get("min_ndl"))
+        and row["min_ndl"] < NDL_DANGER_MIN
+    ):
         issues.append(
             f"DANGEROUSLY LOW NDL: Minimum NDL dropped to {row['min_ndl']:.0f} minutes. "
             f"This is cutting it extremely close to mandatory decompression."
@@ -350,7 +419,7 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"Bolted to the surface (>{SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min through "
         f"the last {SHALLOW_ZONE_M:.0f} m): "
         f"{_pct(int((surfacing > SHALLOW_ASCENT_LIMIT_M_MIN).sum()), n)}",
-        f"Entered decompression: {_pct(int(features['entered_deco'].sum()), n)}",
+        *_deco_concerns(features, n, _pct),
         f"Low NDL (<{NDL_DANGER_MIN:.0f} min): "
         f"{_pct(int((ndl < NDL_DANGER_MIN).sum()), cov['ndl'], 'dives with NDL')}",
         f"High SAC (>{SAC_HIGH_L_MIN:.0f} L/min): "
@@ -396,6 +465,20 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
     )
 
 
+def _deco_concerns(features: pd.DataFrame, n: int, pct) -> list[str]:
+    if "technical" not in features.columns:
+        return [f"Entered decompression: {pct(int(features['entered_deco'].sum()), n)}"]
+    flags = features.apply(deco_flags, axis=1, result_type="expand")
+    return [
+        f"Technical dives (trimix, deco gas or rebreather): "
+        f"{pct(int(flags['technical'].sum()), n)}",
+        f"Entered decompression on a recreational dive: "
+        f"{pct(int(flags['recreational_deco'].sum()), n)}",
+        f"Missed a required deco stop: {pct(int(flags['missed_stop'].sum()), n)}",
+        f"Surfaced with deco still owed: {pct(int(flags['surfaced_owing'].sum()), n)}",
+    ]
+
+
 def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
     """One DAN search phrase per anomaly actually measured in the log.
 
@@ -409,9 +492,20 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
     shallow = features.get("max_shallow_ascend_speed")
     if shallow is not None and shallow.max() > SHALLOW_ASCENT_LIMIT_M_MIN:
         keywords.append("fast final ascent to surface safety stop skipped")
-    entered_deco = "entered_deco" in features.columns and features["entered_deco"].any()
-    if entered_deco or (features["min_ndl"] < 1).any():
+    flags = (
+        features.apply(deco_flags, axis=1, result_type="expand")
+        if "technical" in features.columns
+        else None
+    )
+    recreational_deco = (
+        flags["recreational_deco"].any()
+        if flags is not None
+        else "entered_deco" in features.columns and features["entered_deco"].any()
+    )
+    if recreational_deco or (features["min_ndl"] < 1).any():
         keywords.append("close to deco stop NDL almost zero recreational limit")
+    if flags is not None and (flags["missed_stop"] | flags["surfaced_owing"]).any():
+        keywords.append("missed decompression stop omitted deco surfaced")
     if (features["sac_rate"] > SAC_HIGH_L_MIN).any():
         keywords.append("high air consumption SAC rate breathing")
     if features["max_depth"].max() > DEEP_M:

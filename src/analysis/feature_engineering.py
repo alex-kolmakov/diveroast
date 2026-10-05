@@ -26,6 +26,15 @@ IN_WATER_M = 1.5  # shallower readings are often air or sun on the sensor
 COLD_WATER_C = 10.0
 STOP_ZONE_M = 6.0  # the ascent and safety-stop phase after the deepest point
 
+# Technical dives plan their deco, so deco entry alone isn't a mistake for
+# them. Exports can show it (none can show "planned"): helium in a gas, a
+# switch to a much richer deco gas, or a rebreather.
+TECH_O2_SPREAD = 10.0  # O2 points between the gases breathed (EAN28->29 isn't one)
+TECH_MODES = {"CCR", "PSCR"}
+# Deco stop adherence: shallower than the stop the computer asks for, by
+# more than this, counts as missing it (waves and sensor noise below it).
+STOP_TOLERANCE_M = 1.0
+
 # An NDL of 0 is only a real reading if the computer counted down to it.
 NDL_COUNTDOWN_MAX_MIN = 5.0
 
@@ -259,6 +268,71 @@ def _thermal(dive: pd.DataFrame) -> dict[str, float]:
     return out
 
 
+def _deco(dive: pd.DataFrame) -> dict[str, float]:
+    """Deco time and whether the stops were kept, for one dive sorted by time.
+
+    Computers write ``in_deco`` and ``stop_depth`` only when they change, so
+    both hold until the next reading. Underwater time more than
+    STOP_TOLERANCE_M above the stop the computer asked for counts as missed.
+    Reaching the surface with a stop still owed is ``surfaced_owing`` (the
+    stop depth); time logged at the surface afterwards doesn't count as
+    missed minutes. NaN when the log doesn't record it: no deco flag at all,
+    or deco without stop depths.
+    """
+    out = {
+        "deco_minutes": np.nan,
+        "missed_stop_minutes": np.nan,
+        "max_above_stop": np.nan,
+        "surfaced_owing": np.nan,
+    }
+    flag = dive["in_deco"]
+    if flag.isna().all():
+        return out
+    t = dive["time"].to_numpy(dtype=float)
+    step = np.diff(t, append=t[-1])
+    owed = (flag.ffill().fillna(0) >= 1).to_numpy()
+    out["deco_minutes"] = float(step[owed].sum() / 60)
+    if not owed.any():
+        out.update(missed_stop_minutes=0.0, max_above_stop=0.0, surfaced_owing=0.0)
+        return out
+    if "stop_depth" not in dive:
+        return out
+    stop = dive["stop_depth"].ffill().to_numpy(dtype=float)
+    known = owed & ~np.isnan(stop)
+    if not known.any():
+        return out
+    depth = dive["depth"].to_numpy(dtype=float)
+    above = stop - depth
+    underwater = depth >= SURFACE_M
+    missed = known & underwater & (above > STOP_TOLERANCE_M)
+    out["missed_stop_minutes"] = float(step[missed].sum() / 60)
+    out["max_above_stop"] = float(above[missed].max()) if missed.any() else 0.0
+    at_surface = known & ~underwater
+    out["surfaced_owing"] = float(stop[at_surface].max()) if at_surface.any() else 0.0
+    return out
+
+
+def deco_adherence(data: pd.DataFrame) -> pd.DataFrame:
+    """Per-dive deco time and missed stops, from data sorted by dive and time."""
+    rows = [
+        {"dive_number": number, **_deco(dive)}
+        for number, dive in data.groupby("dive_number", sort=False)
+    ]
+    return pd.DataFrame(rows)
+
+
+def technical_reason(row) -> str:
+    """Why a dive counts as technical ("" if it doesn't), from its gases."""
+    reasons = []
+    if (row.get("max_helium") or 0) > 0:
+        reasons.append("trimix")
+    if (row.get("o2_spread") or 0) >= TECH_O2_SPREAD:
+        reasons.append("deco gas")
+    if row.get("dive_mode") in TECH_MODES:
+        reasons.append(str(row["dive_mode"]))
+    return ", ".join(reasons)
+
+
 def thermal_exposure(data: pd.DataFrame) -> pd.DataFrame:
     """Per-dive thermal exposure, from data sorted by dive and time."""
     rows = [
@@ -286,7 +360,15 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
 
     optional = {
         col: (col, "first")
-        for col in ("dive_site_name", "trip_name", "latitude", "longitude")
+        for col in (
+            "dive_site_name",
+            "trip_name",
+            "latitude",
+            "longitude",
+            "max_helium",
+            "o2_spread",
+            "dive_mode",
+        )
         if col in data.columns
     }
     features = (
@@ -316,6 +398,9 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
 
     features = features.merge(ascend_speed_features, on="dive_number")
     features = features.merge(thermal_exposure(data), on="dive_number")
+    features = features.merge(deco_adherence(data), on="dive_number")
+    features["tech_reason"] = features.apply(technical_reason, axis=1)
+    features["technical"] = features["tech_reason"] != ""
 
     # Temperature gradient: difference between warmest (surface) and coldest (depth)
     # Captures the thermocline the diver crossed within the dive.

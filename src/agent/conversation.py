@@ -37,6 +37,7 @@ from src.tools.dive import (
     anomaly_queries,
     build_anomaly_keywords,
     coverage_line,
+    deco_flags,
     dive_label,
     fmt,
     measured,
@@ -183,9 +184,23 @@ def _dive_line(row) -> str:
         parts.append(f"ascent {row['max_ascend_speed']:.1f}m/min")
     if measured(row.get("max_shallow_ascend_speed")):
         parts.append(f"surfacing {row['max_shallow_ascend_speed']:.1f}m/min")
+    deco = deco_flags(row)
+    if deco["technical"]:
+        parts.append(f"TECH ({row.get('tech_reason')})")
     if row.get("entered_deco"):
-        parts.append("ENTERED DECO")
-    if measured(row.get("min_ndl")):
+        minutes = row.get("deco_minutes")
+        length = f" {minutes:.0f}min" if measured(minutes) else ""
+        label = "planned deco" if deco["technical"] else "ENTERED DECO"
+        kept = ", stops kept" if deco["stops_kept"] else ""
+        parts.append(f"{label}{length}{kept}")
+    if deco["missed_stop"]:
+        parts.append(
+            f"MISSED STOP {row['missed_stop_minutes']:.1f}min, up to "
+            f"{row['max_above_stop']:.1f}m above it"
+        )
+    if deco["surfaced_owing"]:
+        parts.append(f"SURFACED OWING a {row['surfaced_owing']:.0f}m stop")
+    if measured(row.get("min_ndl")) and not deco["technical"]:
         parts.append(f"NDL {row['min_ndl']:.0f}min")
     if measured(row.get("sac_rate")):
         parts.append(f"SAC {row['sac_rate']:.1f}L/min")
@@ -293,6 +308,7 @@ class DiverRoastAgent:
         sac = features_df["sac_rate"]
         ndl = features_df["min_ndl"]
         thermal = features_df.apply(thermal_flags, axis=1, result_type="expand")
+        decos = features_df.apply(deco_flags, axis=1, result_type="expand")
         agg = (
             f"Aggregates ({n} dives): "
             f"avg max depth {features_df['max_depth'].mean():.1f}m, "
@@ -306,7 +322,11 @@ class DiverRoastAgent:
             f"to the surface (>10 m/min from the safety stop, the last "
             f"{SHALLOW_ZONE_M:.0f} m), "
             f"lowest NDL {fmt(ndl.min(), '.0f', ' min')}, "
-            f"{int(features_df['entered_deco'].sum())} dives entered deco | "
+            f"{int(decos['technical'].sum())} technical dives, "
+            f"{int(decos['recreational_deco'].sum())} recreational dives entered deco "
+            f"(stops kept on {int((decos['recreational_deco'] & decos['stops_kept']).sum())}), "
+            f"{int(decos['missed_stop'].sum())} missed a deco stop, "
+            f"{int(decos['surfaced_owing'].sum())} surfaced owing deco | "
             f"temperature exposure: {temp_exposure_str}, "
             f"avg thermocline gradient {fmt(features_df['temp_gradient'].mean(), unit='°C')}, "
             f"{int(thermal['prolonged_cold'].sum())} dives with prolonged cold, "
@@ -343,7 +363,11 @@ class DiverRoastAgent:
             f"ascent rate; 'surfacing' is the fastest final ascent from the safety "
             f"stop (the last {SHALLOW_ZONE_M:.0f} m), where the pressure change is "
             f"largest. Both limits are "
-            f"10 m/min. Thermal flags come from water temperature only (not the "
+            f"10 m/min. TECH marks a technical dive (trimix, a deco gas or a "
+            f"rebreather): its deco is planned, not a mistake. ENTERED DECO is a "
+            f"recreational dive that went into deco; 'stops kept' means every "
+            f"required stop was done. MISSED STOP and SURFACED OWING mean a required "
+            f"stop was skipped. Thermal flags come from water temperature only (not the "
             f"suit or the diver's body): PROLONGED COLD is {PROLONGED_COLD_MIN:.0f}+ min "
             f"below {COLD_WATER_C:.0f}°C (hypothermia risk), COLD STOPS means the ascent "
             f"and stops were in water below {COLD_WATER_C:.0f}°C (slower gas washout, "
