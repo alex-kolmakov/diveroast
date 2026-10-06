@@ -29,6 +29,14 @@ def get_client() -> genai.Client | OpenAICompatClient:
     return genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
+def thinking_config(level: str | None = None) -> types.ThinkingConfig | None:
+    """A thinking level (default THINKING_LEVEL), or None for the model's own."""
+    level = settings.THINKING_LEVEL if level is None else level
+    if not level:
+        return None
+    return types.ThinkingConfig(thinking_level=types.ThinkingLevel(level.upper()))
+
+
 def _status(e: Exception) -> int | None:
     if isinstance(e, errors.APIError):
         return e.code

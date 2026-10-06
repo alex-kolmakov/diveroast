@@ -42,7 +42,15 @@ class Settings(BaseSettings):
     # Output caps per model call (thinking tokens count against them too).
     # A roast is ~120 words; a follow-up answer a few paragraphs.
     CHAT_MAX_OUTPUT_TOKENS: int = 2048
-    SUMMARY_MAX_OUTPUT_TOKENS: int = 1024  # the worst-dive jabs, one JSON array
+    SUMMARY_MAX_OUTPUT_TOKENS: int = 2048  # the worst-dive jabs, one JSON array
+    # Thinking level for every model call: "" = the model's default, or
+    # MINIMAL / LOW / MEDIUM / HIGH. Thinking tokens count against the output
+    # caps: 3.6 Flash at its default thinks ~2,000 tokens a turn, truncating
+    # chat answers and every dashboard summary. LOW suits its chat; the
+    # 25-word summary jabs need none (MINIMAL), and at LOW still spent
+    # ~600-1,000 tokens thinking.
+    THINKING_LEVEL: str = ""
+    SUMMARY_THINKING_LEVEL: str = ""
 
     # Sessions (in-memory)
     SESSION_TTL_SECONDS: int = 6 * 60 * 60

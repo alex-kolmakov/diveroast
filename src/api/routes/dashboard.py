@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from google.genai import types
 
 from src.agent.conversation import DiverRoastAgent
-from src.agent.gemini_client import generate, get_client
+from src.agent.gemini_client import generate, get_client, thinking_config
 from src.agent.usage import daily_budget, record_usage
 from src.analysis.feature_engineering import (
     SHALLOW_ZONE_M,
@@ -31,7 +31,14 @@ from src.api.models import (
 )
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
-from src.tools.dive import deco_flags, dive_issues, fmt, measured, thermal_flags
+from src.tools.dive import (
+    deco_flags,
+    dive_issues,
+    dive_label,
+    fmt,
+    measured,
+    thermal_flags,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -331,8 +338,10 @@ def _generate_dive_summaries(
         "Give every dive a different image and sentence shape, drawn from that "
         "dive's own site, depth or conditions; no missiles, rockets or chamber "
         "rides. "
-        "Only quote numbers given below; a value marked 'not recorded' was not "
-        "logged, so say nothing about it.\n"
+        "Only quote numbers given below, written as digits with their unit, never "
+        "spelled out; a value marked 'not recorded' was not logged, so say nothing "
+        "about it. Never invent facts: no injuries, bends or outcomes that didn't "
+        "happen ('risks a bend', not 'you got bent'), no gear, no motives.\n"
         "Return a JSON array of strings, one per dive, in the same order.\n"
     ]
     for i, d in enumerate(dives):
@@ -363,7 +372,8 @@ def _generate_dive_summaries(
             attempts=2,
             contents="\n".join(prompt_parts),
             config=types.GenerateContentConfig(
-                max_output_tokens=settings.SUMMARY_MAX_OUTPUT_TOKENS
+                max_output_tokens=settings.SUMMARY_MAX_OUTPUT_TOKENS,
+                thinking_config=thinking_config(settings.SUMMARY_THINKING_LEVEL),
             ),
         )
         record_usage(response, "dive summaries")
@@ -385,7 +395,7 @@ def _generate_dive_summaries(
     fallback = []
     for d in dives:
         fallback.append(
-            f"Dive #{d['dive_number']} at {d['site']} was flagged for "
+            f"Dive {dive_label(d['dive_number'])} at {d['site']} was flagged for "
             f"{', '.join(d['issues'][:3])}."
         )
     return fallback

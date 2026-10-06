@@ -624,3 +624,56 @@ async def test_shared_links_stay_under_the_size_cap(tmp_path):
         await store.save("new", data)
     left = sorted(p.name for p in tmp_path.iterdir())
     assert left == ["c.json", "new.json"]  # oldest went first; the new link stays
+
+
+def test_thinking_level_reaches_both_model_calls(monkeypatch):
+    """3.6 Flash's default thinking ate the 1,024-token summary cap (2026-10-06)."""
+    from google.genai import types
+
+    from src.api.routes import dashboard
+
+    monkeypatch.setattr(settings, "THINKING_LEVEL", "low")
+    monkeypatch.setattr(settings, "SUMMARY_THINKING_LEVEL", "minimal")
+    agent = DiverRoastAgent()
+    agent._client = _answer()
+    with patch.object(agent, "_prior_search", return_value=""):
+        agent._run_turn("roast me", PROMPT)
+    chat = agent._client.models.generate_content.call_args.kwargs["config"]
+    assert chat.thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+    client = _answer('["Too fast."]')
+    dive = {
+        "dive_number": "unnum_2025-10-14_154315",
+        "site": "Reef",
+        "pick_reason": "x",
+        "issues": ["y"],
+        "stats": {"max_depth": 20.0},
+    }
+    with patch.object(dashboard, "get_client", return_value=client):
+        dashboard._generate_dive_summaries([dive])
+    summary = client.models.generate_content.call_args.kwargs["config"]
+    assert summary.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
+
+    monkeypatch.setattr(settings, "THINKING_LEVEL", "")
+    agent._client = _answer()
+    with patch.object(agent, "_prior_search", return_value=""):
+        agent._run_turn("roast me", PROMPT)
+    assert (
+        agent._client.models.generate_content.call_args.kwargs["config"].thinking_config
+        is None
+    )
+
+
+def test_fallback_card_text_hides_internal_dive_ids():
+    from src.api.routes import dashboard
+
+    dive = {
+        "dive_number": "unnum_2025-10-14_154315",
+        "site": "Daedalus reef",
+        "pick_reason": "x",
+        "issues": ["rapid ascent"],
+        "stats": {"max_depth": 20.0},
+    }
+    with patch.object(dashboard, "get_client", side_effect=RuntimeError("down")):
+        [text] = dashboard._generate_dive_summaries([dive])
+    assert "unnum" not in text and "2025-10-14 15:43" in text

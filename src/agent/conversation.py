@@ -17,7 +17,7 @@ from src.agent.checks import (
     check_and_strip,
     source_texts,
 )
-from src.agent.gemini_client import generate, get_client
+from src.agent.gemini_client import generate, get_client, thinking_config
 from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
@@ -622,6 +622,7 @@ class DiverRoastAgent:
                 if step == 0
                 else settings.AGENT_TEMPERATURE,
                 max_output_tokens=settings.CHAT_MAX_OUTPUT_TOKENS,
+                thinking_config=thinking_config(),
             )
             if out_of_steps:
                 config.tool_config = types.ToolConfig(
