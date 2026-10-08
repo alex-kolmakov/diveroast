@@ -39,6 +39,10 @@ def usage_of(response: types.GenerateContentResponse) -> Usage:
     )
 
 
+# Shares of the daily budget that raise an early warning, before the pause.
+WARN_AT = (0.5, 0.8)
+
+
 class DailyBudget:
     """Tokens spent today (UTC) across every session: the circuit breaker.
 
@@ -96,6 +100,16 @@ class DailyBudget:
                     tokens=self._tokens,
                     limit=limit,
                 )
+                return
+            # One call can jump two marks: only the highest is worth an alert.
+            for share in sorted(WARN_AT, reverse=True):
+                if before < limit * share <= self._tokens:
+                    alert(
+                        f"Daily token budget {share:.0%} used",
+                        tokens=self._tokens,
+                        limit=limit,
+                    )
+                    break
 
     def spent(self, today: date | None = None) -> bool:
         with self._lock:

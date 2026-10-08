@@ -351,6 +351,35 @@ def test_unreadable_usage_file_counts_from_zero(monkeypatch, tmp_path):
     assert DailyBudget(path).spent(today=today)
 
 
+def test_daily_budget_warns_before_it_is_spent(monkeypatch):
+    from datetime import date
+
+    from src.agent import usage
+
+    alerts: list[str] = []
+    monkeypatch.setattr(usage, "alert", lambda message, **_: alerts.append(message))
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 100)
+    today = date(2026, 10, 20)
+    budget = usage.DailyBudget()
+    budget.add(40, today=today)
+    assert alerts == []
+    budget.add(10, today=today)
+    budget.add(10, today=today)  # still between marks: no repeat
+    assert alerts == ["Daily token budget 50% used"]
+    budget.add(25, today=today)
+    budget.add(15, today=today)
+    assert alerts == [
+        "Daily token budget 50% used",
+        "Daily token budget 80% used",
+        "Daily token budget spent; roasts paused until midnight UTC",
+    ]
+
+    # One big call past both marks raises only the higher one.
+    alerts.clear()
+    usage.DailyBudget().add(90, today=today)
+    assert alerts == ["Daily token budget 80% used"]
+
+
 def test_every_model_call_counts_against_the_daily_budget(monkeypatch):
     from src.agent.usage import daily_budget
 
