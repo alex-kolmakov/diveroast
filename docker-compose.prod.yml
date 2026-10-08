@@ -45,6 +45,8 @@ services:
       - ./.dlt:/app/.dlt
       - diveroast-snapshots:/tmp/diveroast-snapshots
       - diveroast-donations:/tmp/diveroast-donations
+      # Today's token count: without it every restart reset the daily budget.
+      - diveroast-state:/tmp/diveroast-state
     healthcheck:
       # /health fails on a missing or partial DAN index and a nearly full disk
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -98,4 +100,5 @@ services:
 volumes:
   diveroast-snapshots:
   diveroast-donations:
+  diveroast-state:
   phoenix-data:

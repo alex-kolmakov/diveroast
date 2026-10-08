@@ -320,6 +320,37 @@ def test_daily_budget_resets_at_midnight_utc(monkeypatch):
     assert not budget.spent(today=date(2026, 10, 21))
 
 
+def test_daily_budget_survives_a_restart(monkeypatch, tmp_path):
+    from datetime import date
+
+    from src.agent.usage import DailyBudget
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 100)
+    path = tmp_path / "state" / "daily_usage.json"
+    today = date(2026, 10, 20)
+    DailyBudget(path).add(100, today=today)
+
+    restarted = DailyBudget(path)
+    assert restarted.spent(today=today)
+    # Yesterday's saved count doesn't carry into a new day.
+    assert not DailyBudget(path).spent(today=date(2026, 10, 21))
+
+
+def test_unreadable_usage_file_counts_from_zero(monkeypatch, tmp_path):
+    from datetime import date
+
+    from src.agent.usage import DailyBudget
+
+    monkeypatch.setattr(settings, "DAILY_MAX_TOKENS", 100)
+    path = tmp_path / "daily_usage.json"
+    path.write_text("{not json")
+    today = date(2026, 10, 20)
+    budget = DailyBudget(path)
+    assert not budget.spent(today=today)
+    budget.add(100, today=today)
+    assert DailyBudget(path).spent(today=today)
+
+
 def test_every_model_call_counts_against_the_daily_budget(monkeypatch):
     from src.agent.usage import daily_budget
 

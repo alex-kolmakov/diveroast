@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # the dashboard uses template summaries until midnight UTC. One roast on a
     # ~200-dive log is ~20k tokens.
     DAILY_MAX_TOKENS: int = 20_000_000
+    # Where today's count is kept so a restart doesn't reset it (a Docker
+    # named volume in production). Empty = in memory only.
+    DAILY_USAGE_FILE: str = "/tmp/diveroast-state/daily_usage.json"
 
     # Per-IP rate limits (per hour). Generous on purpose: a conference room or
     # office shares one IP, and the session and daily budgets cap the cost.
