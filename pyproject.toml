@@ -28,7 +28,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "sse-starlette>=2.0",
     # MCP
-    "mcp[cli]>=1.0",
+    "mcp[cli]>=1.0,<2",
     # Observability
     "arize-phoenix-otel>=0.6",
     "arize-phoenix-client>=1.0",

@@ -567,7 +567,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "lancedb", specifier = ">=0.13" },
     { name = "langchain-text-splitters", specifier = ">=0.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.0,<2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openinference-instrumentation-google-genai", specifier = ">=0.1" },
     { name = "pandas", specifier = ">=2.2" },
