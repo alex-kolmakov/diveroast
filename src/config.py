@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.1-flash-lite-preview"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
     # Local OpenAI-compatible server (LM Studio, Ollama). When LLM_BASE_URL is
     # set it replaces Gemini, e.g. http://localhost:1234/v1
