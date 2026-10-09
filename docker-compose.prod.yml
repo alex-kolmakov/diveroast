@@ -6,9 +6,20 @@ x-logging: &logging
     max-size: "20m"
     max-file: "5"
 
+# The server also runs other things. No container gets more than it started
+# with: no privilege gain through setuid binaries, no Linux capabilities
+# beyond the few a service names, and a cap on processes.
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 512
+
 services:
   nginx:
     logging: *logging
+    <<: *hardening
+    cap_add: [NET_BIND_SERVICE, CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+    mem_limit: 128m
     image: nginx:alpine
     ports:
       - "80:80"
@@ -26,6 +37,9 @@ services:
 
   backend:
     logging: *logging
+    <<: *hardening
+    mem_limit: 1536m
+    cpus: 1.5
     build:
       context: .
       dockerfile: Dockerfile
@@ -61,6 +75,9 @@ services:
 
   frontend:
     logging: *logging
+    <<: *hardening
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+    mem_limit: 128m
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -76,6 +93,8 @@ services:
 
   phoenix:
     logging: *logging
+    <<: *hardening
+    mem_limit: 1g
     image: arizephoenix/phoenix:version-20.16.0  # pinned; was :latest
     environment:
       # Traces hold every visitor's dive summary and messages: keep 30 days
