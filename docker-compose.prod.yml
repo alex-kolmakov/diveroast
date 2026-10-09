@@ -20,6 +20,9 @@ services:
       - backend
       - frontend
     restart: unless-stopped
+    # `web` is shared with other sites on this server that this nginx also
+    # serves (see the second server block in deploy/nginx.conf).
+    networks: [default, web]
 
   backend:
     logging: *logging
@@ -102,3 +105,8 @@ volumes:
   diveroast-donations:
   diveroast-state:
   phoenix-data:
+
+networks:
+  # Created once on the server: docker network create web
+  web:
+    external: true

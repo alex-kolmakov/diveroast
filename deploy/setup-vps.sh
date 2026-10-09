@@ -24,6 +24,9 @@ echo "==> Enabling Docker service"
 systemctl enable docker
 systemctl start docker
 
+echo "==> Creating the Docker network shared with other sites on this server"
+docker network inspect web > /dev/null 2>&1 || docker network create web
+
 echo "==> Cloning repository"
 mkdir -p "$APP_DIR"
 git clone "$REPO_URL" "$APP_DIR"
