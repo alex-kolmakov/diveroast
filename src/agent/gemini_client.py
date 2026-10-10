@@ -58,10 +58,13 @@ def generate(
     ModelBusyError once the retries are used up on a retryable error.
     """
     for attempt in range(attempts):
+        started = time.monotonic()
         try:
-            return client.models.generate_content(
+            response = client.models.generate_content(
                 model=settings.GEMINI_MODEL, contents=contents, config=config
             )
+            logger.info("Model answered in %.1f s", time.monotonic() - started)
+            return response
         except Exception as e:
             code = _status(e)
             if code not in _RETRY_CODES:

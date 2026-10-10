@@ -160,6 +160,7 @@ def retrieve_many(
     Separate searches keep each query focused: joined into one string, the
     phrases dilute each other and the same generic chunks win every time.
     """
+    started = time.monotonic()
     dbtable = dan_table()
     queries = [query for query in queries if query]
     # Reranking dominates and runs outside the GIL, so the searches overlap.
@@ -167,6 +168,9 @@ def retrieve_many(
         frames = list(
             pool.map(lambda q: hybrid_search(dbtable, q, top_k, where), queries)
         )
+    logger.info(
+        "DAN search: %d queries in %.1f s", len(queries), time.monotonic() - started
+    )
     frames = [frame for frame in frames if not frame.empty]
     if not frames:
         return Retrieval(text=NO_GUIDANCE)
