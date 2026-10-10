@@ -1,5 +1,7 @@
 import html
+import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -9,6 +11,8 @@ from lancedb.rerankers import CrossEncoderReranker
 
 from src.config import settings
 from src.observability import get_tracer
+
+logger = logging.getLogger(__name__)
 
 _RERANKER: CrossEncoderReranker | None = None
 _TABLE = None
@@ -68,6 +72,17 @@ def _get_reranker() -> CrossEncoderReranker | None:
             column="value",  # CRITICAL: LanceDB column is "value" not default "text"
         )
     return _RERANKER
+
+
+def warm_up() -> None:
+    """Run one search so the first visitor doesn't wait for the models.
+
+    The first search imports torch and loads the embedding model and the
+    reranker: 24 s on the production server, once per process.
+    """
+    started = time.monotonic()
+    hybrid_search(dan_table(), "decompression", top_k=1)
+    logger.info("DAN search warmed up in %.1f s", time.monotonic() - started)
 
 
 def hybrid_search(
