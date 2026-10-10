@@ -1,4 +1,5 @@
 import html
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -10,6 +11,8 @@ from src.config import settings
 from src.observability import get_tracer
 
 _RERANKER: CrossEncoderReranker | None = None
+_TABLE = None
+_TABLE_LOCK = threading.Lock()
 
 # DAN's case summaries: real divers, what they did, what happened. 139 of
 # the ~1,900 articles; unfiltered, general articles outrank them.
@@ -30,6 +33,28 @@ class Retrieval:
 
     def __str__(self) -> str:
         return self.text
+
+
+def dan_table():
+    """The DAN table, opened once per process and brought up to date on each call.
+
+    The embedding model belongs to the table handle and loads on its first
+    search. A handle opened per request loaded the model again every time,
+    and once per thread when ``retrieve_many`` searched in parallel: a dozen
+    copies at once, 2 GB at the peak. ``checkout_latest`` picks up an
+    ingestion run in another process, a full rebuild included.
+    """
+    global _TABLE
+    with _TABLE_LOCK:
+        if _TABLE is None:
+            db = lancedb.connect(settings.LANCEDB_URI)
+            table = db.open_table(settings.LANCEDB_TABLE_NAME)
+            # Load the model here, in one thread, before parallel searches
+            table.search("decompression").limit(1).to_list()
+            _TABLE = table
+        else:
+            _TABLE.checkout_latest()
+        return _TABLE
 
 
 def _get_reranker() -> CrossEncoderReranker | None:
@@ -109,9 +134,7 @@ def retrieve(
         "rag.retrieve_context",
         attributes={"openinference.span.kind": "RETRIEVER"},
     ):
-        db = lancedb.connect(settings.LANCEDB_URI)
-        dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
-        return format_results(hybrid_search(dbtable, query, top_k, where))
+        return format_results(hybrid_search(dan_table(), query, top_k, where))
 
 
 def retrieve_many(
@@ -122,8 +145,7 @@ def retrieve_many(
     Separate searches keep each query focused: joined into one string, the
     phrases dilute each other and the same generic chunks win every time.
     """
-    db = lancedb.connect(settings.LANCEDB_URI)
-    dbtable = db.open_table(settings.LANCEDB_TABLE_NAME)
+    dbtable = dan_table()
     queries = [query for query in queries if query]
     # Reranking dominates and runs outside the GIL, so the searches overlap.
     with ThreadPoolExecutor(max_workers=max(len(queries), 1)) as pool:

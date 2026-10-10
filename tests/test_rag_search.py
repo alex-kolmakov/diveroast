@@ -141,3 +141,19 @@ def test_titles_are_stored_as_text_not_html():
     }
     rows = list(dan_articles.__wrapped__(article))  # the plain generator
     assert rows[0]["title"] == "If You Can’t Equalize & Descend"
+
+
+def test_dan_table_is_opened_once_and_refreshed_after():
+    """One handle per process: its embedding model loads once, not per roast."""
+    table = MagicMock()
+    with (
+        patch.object(rag_search_module, "_TABLE", None),
+        patch.object(rag_search_module.lancedb, "connect") as connect,
+    ):
+        connect.return_value.open_table.return_value = table
+        assert rag_search_module.dan_table() is table
+        assert rag_search_module.dan_table() is table
+
+    connect.assert_called_once()
+    table.search.assert_called_once()  # the model was loaded when the table was opened
+    table.checkout_latest.assert_called_once()  # the second call picked up new data
