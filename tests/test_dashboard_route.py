@@ -6,6 +6,10 @@ from httpx import ASGITransport, AsyncClient
 from src.api.dependencies import get_or_create_session
 from src.api.main import app
 from src.api.routes.dashboard import (
+    ISSUE_FAMILY,
+    ISSUE_RANK_KEY,
+    PICK_REASONS,
+    _categories_by_severity,
     _classify_experience,
     _classify_ndl_zone,
     _classify_region,
@@ -137,6 +141,60 @@ class TestIdentifyIssues:
         ]
 
 
+class TestPickOrder:
+    """Cards follow what is worst in the log, not a fixed ascent-first list."""
+
+    CALM = {
+        "max_depth": 15,
+        "max_ascend_speed": 6,
+        "max_shallow_ascend_speed": 6,
+        "min_ndl": 30,
+        "end_pressure": 80,
+        "safety_stop_minutes": 4,
+        "redescents": 0,
+        "mid_dive_surfacings": 0,
+    }
+
+    def _scored(self, *rows):
+        return [
+            (str(i), _compute_danger_score(row), row, _identify_issues(row))
+            for i, row in enumerate(rows, start=1)
+        ]
+
+    def test_gas_and_stop_issues_score(self):
+        assert _compute_danger_score({**self.CALM, "end_pressure": 40}) == 2.0
+        assert _compute_danger_score({**self.CALM, "end_pressure": 10}) == 4.0
+        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 2}) == 2.0
+        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 0.5}) == 4.0
+        assert _compute_danger_score({**self.CALM, "redescents": 3}) == 2.0
+
+    def test_new_issues_are_identified(self):
+        row = {**self.CALM, "end_pressure": 10, "safety_stop_minutes": 0.5}
+        assert _identify_issues(row) == ["low gas reserve", "short safety stop"]
+
+    def test_unrecorded_gas_and_stop_score_nothing(self):
+        row = {**self.CALM, "end_pressure": None, "safety_stop_minutes": None}
+        assert _compute_danger_score(row) == 0.0
+
+    def test_an_empty_tank_outranks_a_slightly_fast_ascent(self):
+        scored = self._scored(
+            {**self.CALM, "max_ascend_speed": 9.5},
+            {**self.CALM, "end_pressure": 10},
+        )
+        assert _categories_by_severity(scored)[0] == "low gas reserve"
+
+    def test_ties_go_to_the_more_serious_issue(self):
+        scored = self._scored(
+            {**self.CALM, "max_ascend_speed": 12},
+            {**self.CALM, "end_pressure": 10},
+        )
+        assert _categories_by_severity(scored) == ["low gas reserve", "rapid ascent"]
+
+    def test_both_ascent_tiers_share_one_family(self):
+        assert ISSUE_FAMILY["rapid ascent"] == ISSUE_FAMILY["bolted to surface"]
+        assert set(PICK_REASONS) == set(ISSUE_RANK_KEY)
+
+
 class TestClassifyWaterType:
     def test_tropical(self):
         assert _classify_water_type(28.0) == "Tropical"
@@ -254,6 +312,12 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
     if len(data["top_problematic_dives"]) > 1:
         scores = [d["danger_score"] for d in data["top_problematic_dives"]]
         assert scores == sorted(scores, reverse=True)
+
+    # At most one ascent card: the other slots go to other kinds of problem
+    reasons = [d["pick_reason"] for d in data["top_problematic_dives"]]
+    assert len(set(reasons)) == len(reasons)
+    assert sum("ascent" in r or "bolt" in r for r in reasons) <= 1
+    assert "Lowest gas reserve" in reasons
 
     # Problematic dives have summary and pick_reason
     for dive in data["top_problematic_dives"]:

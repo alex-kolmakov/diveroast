@@ -32,11 +32,15 @@ from src.api.models import (
 from src.config import settings
 from src.storage.snapshots import SnapshotStore
 from src.tools.dive import (
+    RESERVE_BAR,
+    SAC_HIGH_L_MIN,
+    SAFETY_STOP_MIN,
     deco_flags,
     dive_issues,
     dive_label,
     fmt,
     measured,
+    profile_flags,
     thermal_flags,
 )
 
@@ -62,21 +66,46 @@ TEMP_COLD_WARNING = 10.0
 
 # What makes each issue category distinctive for "pick reason"
 PICK_REASONS = {
-    "rapid ascent": "Fastest ascent rate",
-    "bolted to surface": "Fastest bolt to the surface",
+    "missed deco stop": "Longest above a required deco stop",
     "low NDL": "Closest to decompression limit",
+    "low gas reserve": "Lowest gas reserve",
+    "bolted to surface": "Fastest bolt to the surface",
+    "rapid ascent": "Fastest ascent rate",
+    "short safety stop": "Shortest safety stop",
+    "surfaced mid-dive": "Surfaced mid-dive and went back down",
+    "sawtooth profile": "Most re-descents",
     "high air consumption": "Highest air consumption",
     "deep dive": "Deepest dive with issues",
 }
 
-# Which metric to rank by for each issue (and whether higher or lower is worse)
+# Which metric to rank by for each issue (and whether higher or lower is worse).
+# Listed most serious first: the order breaks ties between issues whose worst
+# dives score the same.
 ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
-    "rapid ascent": ("max_ascend_speed", True),  # higher is worse
-    "bolted to surface": ("max_shallow_ascend_speed", True),  # higher is worse
+    "missed deco stop": ("missed_stop_minutes", True),  # higher is worse
     "low NDL": ("ndl_rank", False),  # lower is worse; deco entry ranks lowest
+    "low gas reserve": ("end_pressure", False),  # lower is worse
+    "bolted to surface": ("max_shallow_ascend_speed", True),  # higher is worse
+    "rapid ascent": ("max_ascend_speed", True),  # higher is worse
+    "short safety stop": ("safety_stop_minutes", False),  # lower is worse
+    "surfaced mid-dive": ("mid_dive_surfacings", True),  # higher is worse
+    "sawtooth profile": ("redescents", True),  # higher is worse
     "high air consumption": ("sac_rate", True),  # higher is worse
     "deep dive": ("max_depth", True),  # higher is worse
 }
+
+# Issues that are the same story told twice: only one of each gets a card.
+ISSUE_FAMILY = {
+    "missed deco stop": "deco",
+    "low NDL": "deco",
+    "bolted to surface": "ascent",
+    "rapid ascent": "ascent",
+}
+
+# Half a minute at the stop, or a tank this empty, is the far end of the scale.
+SAFETY_STOP_DANGER_MIN = 1.0
+RESERVE_DANGER_BAR = 30.0
+SAWTOOTH_DANGER_REDESCENTS = 3
 
 # Region bounding boxes: (lat_min, lat_max, lon_min, lon_max)
 REGION_BOXES = {
@@ -220,56 +249,78 @@ def _build_metrics(features_df) -> list[MetricRange]:
     return metrics
 
 
-def _compute_danger_score(row) -> float:
-    """Step-weighted danger score from measured metrics only.
+def _issue_points(row) -> dict[str, float]:
+    """Step-weighted points per issue, from measured metrics only.
 
-    Unrecorded metrics contribute nothing.
+    Unrecorded metrics contribute nothing. An issue's points are its weight
+    times how far past the limit the dive went (1, 2 or 3 steps).
     """
-    score = 0.0
+    points: dict[str, float] = {}
     # Deco (weight 3). Missing a required stop, or surfacing with one owed,
     # is the worst case on any dive. A technical dive plans its deco, so
     # deco entry and low NDL only count on a recreational dive.
     deco = deco_flags(row)
     ndl = row.get("min_ndl")
     if deco["missed_stop"] or deco["surfaced_owing"]:
-        score += 3.0 * 3
+        points["missed deco stop"] = 3.0 * 3
     elif deco["technical"]:
         pass
     elif row.get("entered_deco") or (measured(ndl) and ndl < NDL_WARNING_LOWER):
-        score += 3.0 * 2
+        points["low NDL"] = 3.0 * 2
     elif measured(ndl) and ndl < NDL_SAFE_LOWER:
-        score += 3.0
+        points["low NDL"] = 3.0
 
     # Sustained ascent speed (weight 2)
     ascent = row.get("max_ascend_speed", 0)
     if ascent > 10:
-        score += 2.0 * 2
+        points["rapid ascent"] = 2.0 * 2
     elif ascent > 9:
-        score += 2.0
+        points["rapid ascent"] = 2.0
 
     # Surfacing speed from the safety stop (weight 2): the largest relative
     # pressure change, so a bolt counts as much as a sustained fast ascent.
     surfacing = row.get("max_shallow_ascend_speed", 0)
     if surfacing > 15:
-        score += 2.0 * 2
+        points["bolted to surface"] = 2.0 * 2
     elif surfacing > 10:
-        score += 2.0
+        points["bolted to surface"] = 2.0
+
+    # Gas reserve, safety stop and surfacing mid-dive (weight 2 each)
+    profile = profile_flags(row)
+    if profile["low_reserve"]:
+        low = row["end_pressure"] < RESERVE_DANGER_BAR
+        points["low gas reserve"] = 2.0 * (2 if low else 1)
+    if profile["short_stop"]:
+        short = row["safety_stop_minutes"] < SAFETY_STOP_DANGER_MIN
+        points["short safety stop"] = 2.0 * (2 if short else 1)
+    if profile["surfaced_mid_dive"]:
+        points["surfaced mid-dive"] = 2.0
+
+    # Sawtooth profile (weight 1)
+    if profile["sawtooth"]:
+        many = row["redescents"] >= SAWTOOTH_DANGER_REDESCENTS
+        points["sawtooth profile"] = 1.0 * (2 if many else 1)
 
     # SAC rate (weight 1)
     sac = row.get("sac_rate")
     if measured(sac) and sac > 20:
-        score += 1.0 * 2
+        points["high air consumption"] = 1.0 * 2
     elif measured(sac) and sac > 15:
-        score += 1.0
+        points["high air consumption"] = 1.0
 
     # Depth (weight 1)
     depth = row.get("max_depth", 0)
     if depth > 30:
-        score += 1.0 * 2
+        points["deep dive"] = 1.0 * 2
     elif depth > 18:
-        score += 1.0
+        points["deep dive"] = 1.0
 
-    return score
+    return points
+
+
+def _compute_danger_score(row) -> float:
+    """A dive's danger score: the sum of its issue points."""
+    return sum(_issue_points(row).values())
 
 
 def _identify_issues(row) -> list[str]:
@@ -288,8 +339,19 @@ def _identify_issues(row) -> list[str]:
         row.get("entered_deco") or (measured(ndl) and ndl < NDL_SAFE_LOWER)
     ):
         issues.append("low NDL")
+    profile = profile_flags(row)
+    if profile["low_reserve"]:
+        issues.append("low gas reserve")
+    if profile["short_stop"]:
+        issues.append("short safety stop")
+    if profile["surfaced_mid_dive"]:
+        issues.append("surfaced mid-dive")
+    if profile["sawtooth"]:
+        issues.append("sawtooth profile")
+    if profile["fast_descent"]:
+        issues.append("fast descent")
     sac = row.get("sac_rate")
-    if measured(sac) and sac > 15:
+    if measured(sac) and sac > SAC_HIGH_L_MIN:
         issues.append("high air consumption")
     if row.get("max_depth", 0) > 30:
         issues.append("deep dive")
@@ -301,6 +363,41 @@ def _identify_issues(row) -> list[str]:
     if flags["long_warm"]:
         issues.append("long warm dive")
     return issues
+
+
+def _worst_dive(
+    scored_dives: list[tuple[str, float, dict, list[str]]],
+    issue: str,
+    exclude: set[str] | frozenset[str] = frozenset(),
+) -> tuple[str, float, dict, list[str], str] | None:
+    """The dive with the worst measured value for ``issue``, or None."""
+    rank_col, higher_is_worse = ISSUE_RANK_KEY[issue]
+    best: tuple[str, float, dict, list[str], str] | None = None
+    best_val = 0.0
+    for dive_num, score, row_dict, issues in scored_dives:
+        val = row_dict.get(rank_col)
+        if dive_num in exclude or issue not in issues or not measured(val):
+            continue
+        val = float(cast(float, val))
+        if best is None or (val > best_val if higher_is_worse else val < best_val):
+            best = (dive_num, score, row_dict, issues, issue)
+            best_val = val
+    return best
+
+
+def _categories_by_severity(
+    scored_dives: list[tuple[str, float, dict, list[str]]],
+) -> list[str]:
+    """Issue categories ordered by the points their worst dive earns for them.
+
+    Ties keep the order of ``ISSUE_RANK_KEY``, most serious first.
+    """
+    severity = {}
+    for issue in ISSUE_RANK_KEY:
+        worst = _worst_dive(scored_dives, issue)
+        if worst:
+            severity[issue] = _issue_points(worst[2]).get(issue, 0.0)
+    return sorted(severity, key=lambda issue: severity[issue], reverse=True)
 
 
 def _deco_summary(stats) -> str:
@@ -358,8 +455,14 @@ def _generate_dive_summaries(
             f"{_deco_summary(d['stats'])}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
             f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "
+            f"last_tank_reading={fmt(d['stats'].get('end_pressure'), '.0f', ' bar')} "
+            f"(usual reserve {RESERVE_BAR:.0f} bar), "
+            f"safety_stop={fmt(d['stats'].get('safety_stop_minutes'), unit=' min')} "
+            f"(usual {SAFETY_STOP_MIN:.0f} min), "
+            f"re-descents={fmt(d['stats'].get('redescents'), '.0f')}, "
+            f"mid-dive surfacings={fmt(d['stats'].get('mid_dive_surfacings'), '.0f')}, "
             f"avg_temp={fmt(d['stats'].get('avg_temp'), unit='°C')}, "
-            f"temp_gradient={fmt(d['stats'].get('temp_gradient'), unit='°C')}"
+            f"thermocline={fmt(d['stats'].get('temp_gradient'), unit='°C')}"
         )
 
     try:
@@ -603,6 +706,11 @@ def _build_dashboard(
                 high_ascend_speed_count=round(float(row["high_ascend_speed_count"]), 0),
                 max_shallow_ascend_speed=_r(row["max_shallow_ascend_speed"]),
                 shallow_bolt_count=int(row["shallow_bolt_count"]),
+                max_descent_speed=_r(row["max_descent_speed"]),
+                redescents=int(row["redescents"]),
+                mid_dive_surfacings=int(row["mid_dive_surfacings"]),
+                safety_stop_minutes=_r(row["safety_stop_minutes"], 1),
+                end_pressure=_r(row["end_pressure"], 1),
                 dive_site_name=str(row.get("dive_site_name", "N/A")),
                 trip_name=str(row.get("trip_name", "N/A")),
                 latitude=_r(lat, 6) if measured(lat) and lat != 0 else None,
@@ -646,32 +754,22 @@ def _build_dashboard(
         tuple[str, float, dict, list[str], str]
     ] = []  # (dn, score, row, issues, pick_issue)
     used_dive_nums: set[str] = set()
-    used_pick_issues: set[str] = set()
+    used_families: set[str] = set()
 
     # First pass: for each issue category, pick the dive with the worst
-    # value for that specific metric (not overall danger score)
-    for pick_issue, (rank_col, higher_is_worse) in ISSUE_RANK_KEY.items():
+    # value for that specific metric (not overall danger score). Categories
+    # go in order of how bad their worst dive is, so the cards follow what
+    # is actually wrong in this log rather than a fixed list.
+    for pick_issue in _categories_by_severity(scored_dives):
         if len(picks) >= 3:
             break
-        best: tuple[str, float, dict, list[str], str] | None = None
-        best_metric_val: float = 0.0
-        for dive_num, score, row_dict, issues in scored_dives:
-            if dive_num in used_dive_nums:
-                continue
-            val = row_dict.get(rank_col)
-            if not measured(val):
-                continue
-            if pick_issue in issues and pick_issue not in used_pick_issues:
-                val = float(cast(float, val))
-                if best is None or (
-                    (higher_is_worse and val > best_metric_val)
-                    or (not higher_is_worse and val < best_metric_val)
-                ):
-                    best = (dive_num, score, row_dict, issues, pick_issue)
-                    best_metric_val = val
+        family = ISSUE_FAMILY.get(pick_issue, pick_issue)
+        if family in used_families:
+            continue
+        best = _worst_dive(scored_dives, pick_issue, used_dive_nums)
         if best:
             used_dive_nums.add(best[0])
-            used_pick_issues.add(best[4])
+            used_families.add(family)
             picks.append(best)
 
     # Second pass: fill remaining slots from highest overall danger score
@@ -680,7 +778,9 @@ def _build_dashboard(
             break
         if dive_num in used_dive_nums:
             continue
-        primary = issues[0] if issues else "rapid ascent"
+        # Headline the dive with what earned it the most points.
+        points = _issue_points(row_dict)
+        primary = max(points, key=lambda issue: points[issue])
         picks.append((dive_num, score, row_dict, issues, primary))
         used_dive_nums.add(dive_num)
 

@@ -65,6 +65,13 @@ class DiveFeature(BaseModel):
     # Surfacing tier; defaults keep pre-P1 snapshots loadable
     max_shallow_ascend_speed: float | None = 0.0
     shallow_bolt_count: int = 0
+    # Profile shape and gas; defaults keep older snapshots loadable. None =
+    # not recorded (no tank pod, too shallow to expect a safety stop)
+    max_descent_speed: float | None = None
+    redescents: int = 0
+    mid_dive_surfacings: int = 0
+    safety_stop_minutes: float | None = None
+    end_pressure: float | None = None  # last tank reading underwater
     # Thermal exposure; None when the computer logged no in-water temperature
     dive_minutes: float | None = None
     water_min_temp: float | None = None

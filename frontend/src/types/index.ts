@@ -54,6 +54,13 @@ export interface DiveFeature {
   high_ascend_speed_count: number;
   max_shallow_ascend_speed?: number | null; // fastest final ascent from the safety stop (last 5 m)
   shallow_bolt_count?: number;
+  // Profile shape and gas; absent in older snapshots, null when not recorded
+  max_descent_speed?: number | null;
+  redescents?: number;
+  mid_dive_surfacings?: number;
+  safety_stop_minutes?: number | null; // null: too shallow to expect a stop
+  end_pressure?: number | null; // last tank reading underwater
+  missed_stop_minutes?: number | null;
   dive_site_name: string;
   trip_name: string;
   latitude: number | null;

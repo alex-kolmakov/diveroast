@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { MapPin, Globe } from "lucide-react";
-import { METRICS, fmtValue, type MetricKind } from "@/lib/metrics";
+import { METRICS, NOT_RECORDED, fmtValue, type MetricKind } from "@/lib/metrics";
 import type { ProblematicDive } from "@/types";
 
 interface Props {
@@ -12,6 +12,11 @@ interface Props {
 
 // The stat that got the dive picked, and the issue badge the title already covers.
 const PICKED_FOR: Record<string, { kind: MetricKind; issue: string }> = {
+  "Longest above a required deco stop": { kind: "missedStop", issue: "missed deco stop" },
+  "Lowest gas reserve": { kind: "reserve", issue: "low gas reserve" },
+  "Shortest safety stop": { kind: "stop", issue: "short safety stop" },
+  "Surfaced mid-dive and went back down": { kind: "surfacings", issue: "surfaced mid-dive" },
+  "Most re-descents": { kind: "redescents", issue: "sawtooth profile" },
   "Fastest ascent rate": { kind: "sustained", issue: "rapid ascent" },
   "Fastest bolt to the surface": { kind: "surfacing", issue: "bolted to surface" },
   "Closest to decompression limit": { kind: "ndl", issue: "low NDL" },
@@ -37,6 +42,11 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
     surfacing: fmtValue(f.max_shallow_ascend_speed, 1, "m/min"),
     ndl: f.entered_deco ? "entered deco" : fmtValue(f.min_ndl, 0, "min"),
     sac: fmtValue(f.sac_rate, 1, "L/min"),
+    reserve: fmtValue(f.end_pressure, 0, "bar"),
+    stop: fmtValue(f.safety_stop_minutes, 1, "min"),
+    redescents: String(f.redescents ?? NOT_RECORDED),
+    surfacings: String(f.mid_dive_surfacings ?? NOT_RECORDED),
+    missedStop: fmtValue(f.missed_stop_minutes, 1, "min"),
   };
   const picked = PICKED_FOR[dive.pick_reason];
 

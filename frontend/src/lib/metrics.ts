@@ -6,6 +6,11 @@ export const METRICS = {
   ndl: { name: "Min NDL", qualifier: "" },
   sac: { name: "SAC rate", qualifier: "" },
   temp: { name: "Temperature", qualifier: "" },
+  reserve: { name: "Last tank reading", qualifier: "underwater" },
+  stop: { name: "Safety stop", qualifier: "between 3 and 6 m" },
+  redescents: { name: "Re-descents", qualifier: "of 5 m or more" },
+  surfacings: { name: "Mid-dive surfacings", qualifier: "" },
+  missedStop: { name: "Above a required stop", qualifier: "" },
 } as const;
 
 export type MetricKind = keyof typeof METRICS;
