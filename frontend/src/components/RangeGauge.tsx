@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { METRICS, NOT_RECORDED, ZONE_TEXT, metricKind } from "@/lib/metrics";
+import { METRICS, NOT_RECORDED, ZONE_TEXT, metricKind, type Zone } from "@/lib/metrics";
 import type { DiveMetricPoint, MetricRange } from "@/types";
 
 interface Props {
@@ -16,7 +16,7 @@ const COLD_COLOR = "#3b82f6";
 const TEMPERATE_COLOR = "#22c55e";
 const TROPICAL_COLOR = "#ef4444";
 
-const fmt = (v: number | null) => (v == null ? "–" : v.toFixed(1));
+const fmt = (v: number | null, places = 1) => (v == null ? "–" : v.toFixed(places));
 
 /** One name per metric; unknown labels (older snapshots) are shown as sent. */
 function displayName(metric: MetricRange): string {
@@ -178,25 +178,92 @@ export function TemperatureGauge({
   );
 }
 
+// Bands of a descriptive gauge: where the dives sit, with no good or bad.
+const BAND_COLORS = { safe: "#7dd3fc", warning: "#38bdf8", danger: "#0284c7" };
+
+const digits = (unit: string) => (unit === "bar" ? 2 : 1);
+
+/** A gauge with no good or bad: depth, air consumption. Bands, not limits. */
+function DescriptiveGauge({ metric }: Props) {
+  const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
+  const dives = metric.per_dive;
+  const count = (zone: DiveMetricPoint["zone"]) => dives.filter((d) => d.zone === zone).length;
+  const { safe_upper: low, warning_upper: high, unit } = metric;
+  const bands = [
+    { zone: "safe" as const, label: `up to ${low} ${unit}` },
+    { zone: "warning" as const, label: `${low}–${high} ${unit}` },
+    { zone: "danger" as const, label: `over ${high} ${unit}` },
+  ].filter((band) => count(band.zone) > 0);
+  const meta = [`avg ${fmt(metric.avg_val)} · range ${fmt(metric.min_val)}–${fmt(metric.max_val)}`, coverage(metric)]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{displayName(metric)}</span>
+        <span className="shrink-0 text-sm font-semibold text-muted-foreground">
+          {metric.max_val != null ? `up to ${metric.max_val.toFixed(1)} ${unit}` : "–"}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{meta}</span>
+        <span className="shrink-0">no limit here</span>
+      </div>
+
+      <DiveBar
+        dives={dives}
+        hovered={hoveredDive}
+        onHover={setHoveredDive}
+        color={(dive) => ({ background: BAND_COLORS[dive.zone] })}
+      />
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {hoveredDive ? (
+          <span style={{ color: BAND_COLORS[hoveredDive.zone] }}>
+            Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(1)} {unit}
+          </span>
+        ) : (
+          bands.map((band) => (
+            <span key={band.zone}>
+              <span className="font-semibold" style={{ color: BAND_COLORS[band.zone] }}>
+                {count(band.zone)}{" "}
+              </span>
+              {band.label}
+            </span>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function RangeGauge({ metric }: Props) {
   const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
   const name = displayName(metric);
   const dives = metric.per_dive;
   if (dives.length === 0) return <NotRecorded name={name} />;
+  if (metric.kind === "descriptive") return <DescriptiveGauge metric={metric} />;
 
+  // A margin is how close the diver ran to a limit: amber at most, never red.
+  const margin = metric.kind === "margin";
+  const shown = (zone: Zone): Zone => (margin && zone === "danger" ? "warning" : zone);
   // NDL is inverted: lower is worse, so its thresholds run high to low.
   const inverted = metric.warning_upper < metric.safe_upper;
   const hasThresholds = metric.safe_upper > 0 && metric.warning_upper > 0;
   const overLimit = dives.filter((d) => d.zone === "danger").length;
   const kind = metricKind(metric.label);
-  const meta = `avg ${fmt(metric.avg_val)} · range ${fmt(metric.min_val)}–${fmt(metric.max_val)}`;
+  const places = digits(metric.unit);
+  const meta = `avg ${fmt(metric.avg_val, places)} · range ${fmt(metric.min_val, places)}–${fmt(metric.max_val, places)}`;
   // What the number means and where the limits sit, under the bar.
   const legend = [
     kind && METRICS[kind].qualifier,
     hasThresholds &&
-      (inverted
-        ? `safe ≥ ${metric.safe_upper} · danger < ${metric.warning_upper} ${metric.unit}`
-        : `safe ≤ ${metric.safe_upper} · limit ${metric.warning_upper} ${metric.unit}`),
+      (margin
+        ? `comfortable ≥ ${metric.safe_upper} · thin < ${metric.warning_upper} ${metric.unit} · a margin, not a limit`
+        : inverted
+          ? `safe ≥ ${metric.safe_upper} · danger < ${metric.warning_upper} ${metric.unit}`
+          : `safe ≤ ${metric.safe_upper} · limit ${metric.warning_upper} ${metric.unit}`),
     coverage(metric),
   ]
     .filter(Boolean)
@@ -206,14 +273,16 @@ export function RangeGauge({ metric }: Props) {
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{name}</span>
-        <span className={`shrink-0 text-sm font-semibold ${ZONE_TEXT[metric.zone]}`}>
-          {metric.worst_val != null ? `worst ${metric.worst_val.toFixed(1)} ${metric.unit}` : "–"}
+        <span className={`shrink-0 text-sm font-semibold ${ZONE_TEXT[shown(metric.zone)]}`}>
+          {metric.worst_val != null
+            ? `${margin ? "closest" : "worst"} ${metric.worst_val.toFixed(places)} ${metric.unit}`
+            : "–"}
         </span>
       </div>
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>{meta}</span>
         {overLimit > 0 && (
-          <span className="shrink-0 font-semibold text-danger">
+          <span className={`shrink-0 font-semibold ${margin ? "text-warning" : "text-danger"}`}>
             {overLimit} {inverted ? `under ${metric.warning_upper} ${metric.unit}` : "over limit"}
           </span>
         )}
@@ -223,7 +292,7 @@ export function RangeGauge({ metric }: Props) {
         dives={dives}
         hovered={hoveredDive}
         onHover={setHoveredDive}
-        color={(dive) => ({ className: ZONE_COLORS[dive.zone] })}
+        color={(dive) => ({ className: ZONE_COLORS[shown(dive.zone)] })}
       >
         {hasThresholds &&
           [...new Set([metric.safe_upper, metric.warning_upper])].map((threshold) => (
@@ -237,8 +306,8 @@ export function RangeGauge({ metric }: Props) {
 
       <div className="text-xs text-muted-foreground">
         {hoveredDive ? (
-          <span className={ZONE_TEXT[hoveredDive.zone]}>
-            Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(1)} {metric.unit}
+          <span className={ZONE_TEXT[shown(hoveredDive.zone)]}>
+            Dive #{hoveredDive.dive_number}: {hoveredDive.value.toFixed(places)} {metric.unit}
           </span>
         ) : (
           <span>{legend || "\u00a0"}</span>

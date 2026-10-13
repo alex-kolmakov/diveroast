@@ -118,8 +118,14 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
     return { x1: start - pad, x2: end + pad };
   };
 
-  const zone = (kind: MetricKind): Zone | undefined =>
-    metrics.find((m) => metricKind(m.label) === kind)?.per_dive[0]?.zone;
+  // Only a limit can be red: a margin is amber at most, and a descriptive
+  // metric (depth, air consumption) has no good or bad to colour.
+  const zone = (kind: MetricKind): Zone | undefined => {
+    const metric = metrics.find((m) => metricKind(m.label) === kind);
+    const value = metric?.per_dive[0]?.zone;
+    if (!metric || metric.kind === "descriptive") return undefined;
+    return metric.kind === "margin" && value === "danger" ? "warning" : value;
+  };
 
   // Issues carry the explanation, ascent events the timing: show them as one list.
   const problems = dive.issues.map((issue) => {
@@ -168,7 +174,7 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
           <Stat
             label={METRICS.ndl.name}
             value={features.entered_deco ? "entered deco" : fmtValue(features.min_ndl, 0, "min")}
-            zone={features.entered_deco ? "danger" : zone("ndl")}
+            zone={features.entered_deco ? "warning" : zone("ndl")}
           />
           <Stat label={METRICS.sac.name} value={fmtValue(features.sac_rate, 1, "L/min")} zone={zone("sac")} />
           <Stat label={METRICS.temp.name} qualifier="average" value={fmtValue(features.avg_temp, 1, "°C")} />

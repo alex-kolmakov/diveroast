@@ -61,6 +61,10 @@ export interface DiveFeature {
   safety_stop_minutes?: number | null; // null: too shallow to expect a stop
   end_pressure?: number | null; // last tank reading underwater
   missed_stop_minutes?: number | null;
+  // Gas at the deepest point; null when the log doesn't name the gas
+  min_o2?: number | null; // leanest gas breathed, % oxygen
+  max_po2?: number | null; // bar
+  gas_density?: number | null; // g/L
   dive_site_name: string;
   trip_name: string;
   latitude: number | null;
@@ -73,9 +77,17 @@ export interface DiveMetricPoint {
   zone: "safe" | "warning" | "danger";
 }
 
+/**
+ * What a gauge's marks mean. "limit": past the second mark is over a limit.
+ * "margin": how close to a limit, never over one. "descriptive": no good or
+ * bad, the marks only split the dives into bands.
+ */
+export type MetricClass = "limit" | "margin" | "descriptive";
+
 export interface MetricRange {
   label: string;
   unit: string;
+  kind?: MetricClass; // absent in older shared snapshots = "limit"
   recorded: number; // dives with a value (0 in older shared snapshots)
   total: number;
   min_val: number | null;
@@ -95,6 +107,7 @@ export interface ProblematicDive {
   issues: string[];
   summary: string;
   pick_reason: string;
+  pick_class?: "limit" | "margin"; // absent in older shared snapshots = "limit"
 }
 
 export interface AggregateStats {

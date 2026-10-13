@@ -13,6 +13,9 @@ interface Props {
 // The stat that got the dive picked, and the issue badge the title already covers.
 const PICKED_FOR: Record<string, { kind: MetricKind; issue: string }> = {
   "Longest above a required deco stop": { kind: "missedStop", issue: "missed deco stop" },
+  "Highest oxygen pressure at depth": { kind: "po2", issue: "oxygen pressure" },
+  "Densest gas at depth": { kind: "density", issue: "gas density" },
+  "Deepest dive, beyond 40 m": { kind: "depth", issue: "deeper than 40 m" },
   "Lowest gas reserve": { kind: "reserve", issue: "low gas reserve" },
   "Shortest safety stop": { kind: "stop", issue: "short safety stop" },
   "Surfaced mid-dive and went back down": { kind: "surfacings", issue: "surfaced mid-dive" },
@@ -47,7 +50,11 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
     redescents: String(f.redescents ?? NOT_RECORDED),
     surfacings: String(f.mid_dive_surfacings ?? NOT_RECORDED),
     missedStop: fmtValue(f.missed_stop_minutes, 1, "min"),
+    po2: fmtValue(f.max_po2, 2, "bar"),
+    density: fmtValue(f.gas_density, 1, "g/L"),
   };
+  // A thin margin is the diver's call, not a broken limit: amber, not red.
+  const margin = dive.pick_class === "margin";
   const picked = PICKED_FOR[dive.pick_reason];
 
   // Older shared snapshots may still carry the retired rating-based issue
@@ -57,7 +64,11 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
     <Card>
       <CardHeader className="pb-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger/20 text-sm font-bold text-danger">
+          <div
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+              dive.pick_class === "margin" ? "bg-warning/20 text-warning" : "bg-danger/20 text-danger"
+            }`}
+          >
             {rank}
           </div>
           <div className="min-w-0 flex-1">
@@ -106,8 +117,12 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
         {/* The stat that got it picked, then the rest on one line */}
         {picked && (
           <div>
-            <div className="text-2xl font-bold text-danger">{stats[picked.kind]}</div>
-            <div className="text-xs text-muted-foreground">{METRICS[picked.kind].name}</div>
+            <div className={`text-2xl font-bold ${margin ? "text-warning" : "text-danger"}`}>
+              {stats[picked.kind]}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {METRICS[picked.kind].name} · {margin ? "thin margin, no limit broken" : "limit broken"}
+            </div>
           </div>
         )}
         <p className="text-xs leading-relaxed text-muted-foreground">

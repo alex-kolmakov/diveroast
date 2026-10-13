@@ -11,6 +11,8 @@ export const METRICS = {
   redescents: { name: "Re-descents", qualifier: "of 5 m or more" },
   surfacings: { name: "Mid-dive surfacings", qualifier: "" },
   missedStop: { name: "Above a required stop", qualifier: "" },
+  po2: { name: "Oxygen pressure", qualifier: "at the deepest point, for the gas breathed" },
+  density: { name: "Gas density", qualifier: "at the deepest point" },
 } as const;
 
 export type MetricKind = keyof typeof METRICS;
@@ -27,6 +29,7 @@ export const ZONE_TEXT: Record<Zone, string> = {
 /** Which metric a backend gauge label refers to (labels differ in older snapshots). */
 export function metricKind(label: string): MetricKind | null {
   const l = label.toLowerCase();
+  if (l.includes("oxygen")) return "po2";
   if (l.includes("surfacing")) return "surfacing";
   if (l.includes("ascent")) return "sustained";
   if (l.includes("ndl")) return "ndl";
