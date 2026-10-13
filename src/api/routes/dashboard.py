@@ -52,12 +52,16 @@ DESCRIPTIVE = "descriptive"
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Gauges: (label, unit, first mark, second mark, class).
-#   limit       - the marks are limits any diver is held to: past the second is red
-#   margin      - how close the diver ran to a limit: amber at most, never "over limit"
+# Gauges: (label, unit, first mark, second mark, class), in panel order.
 #   descriptive - no good or bad: the marks only split the dives into bands
+#   limit       - the marks are limits any diver is held to: past the second is red
+# NDL has no gauge: running it down, even to zero, breaks nothing by itself.
+# What can go wrong with deco is a required stop not kept, and that is shown
+# from the dives' own deco fields.
 THRESHOLDS = {
     "max_depth": ("Max Depth", "m", 18.0, 30.0, DESCRIPTIVE),
+    "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0, DESCRIPTIVE),
+    "avg_temp": ("Avg Temperature", "\u00b0C", None, None, DESCRIPTIVE),
     "max_po2": (
         "Oxygen Pressure at Depth",
         "bar",
@@ -73,15 +77,8 @@ THRESHOLDS = {
         10.0,
         LIMIT,
     ),
-    "min_ndl": ("Min NDL", "min", None, None, MARGIN),  # inverted: lower is closer
-    "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0, DESCRIPTIVE),
-    "avg_temp": ("Avg Temperature", "\u00b0C", None, None, DESCRIPTIVE),
 }
 DESCRIPTIVE_ZONE = "safe"  # a descriptive gauge is never amber or red overall
-
-# NDL thresholds are inverted: >10 safe, 5-10 warning, <5 danger
-NDL_SAFE_LOWER = 10.0
-NDL_WARNING_LOWER = 5.0
 
 # Temperature: cold warning <10
 TEMP_COLD_WARNING = 10.0
@@ -164,14 +161,6 @@ def _classify_zone(value: float, safe_upper: float, warning_upper: float) -> str
     return "danger"
 
 
-def _classify_ndl_zone(value: float) -> str:
-    if value >= NDL_SAFE_LOWER:
-        return "safe"
-    if value >= NDL_WARNING_LOWER:
-        return "warning"
-    return "danger"
-
-
 def _classify_temp_zone(value: float) -> str:
     if value >= TEMP_COLD_WARNING:
         return "safe"
@@ -182,8 +171,6 @@ def _classify_single_value(
     col: str, value: float, safe_up: float | None, warn_up: float | None
 ) -> str:
     """Classify a single value into a zone for a given metric column."""
-    if col == "min_ndl":
-        return _classify_ndl_zone(value)
     if col == "avg_temp":
         return _classify_temp_zone(value)
     assert safe_up is not None and warn_up is not None
@@ -235,17 +222,7 @@ def _build_metrics(features_df) -> list[MetricRange]:
             "avg_val": avg_val,
             "per_dive": per_dive,
         }
-        if col == "min_ndl":
-            metrics.append(
-                MetricRange(
-                    **common,
-                    worst_val=min_val,  # lower is worse for NDL
-                    safe_upper=NDL_SAFE_LOWER,
-                    warning_upper=NDL_WARNING_LOWER,
-                    zone=_classify_ndl_zone(min_val) if min_val is not None else "safe",
-                )
-            )
-        elif col == "avg_temp":
+        if col == "avg_temp":
             metrics.append(
                 MetricRange(
                     **common,

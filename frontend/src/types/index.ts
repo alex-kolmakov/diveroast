@@ -61,6 +61,8 @@ export interface DiveFeature {
   safety_stop_minutes?: number | null; // null: too shallow to expect a stop
   end_pressure?: number | null; // last tank reading underwater
   missed_stop_minutes?: number | null;
+  surfaced_owing?: number | null; // stop depth still owed at the surface
+  technical?: boolean; // trimix, deco gas or rebreather: deco is planned
   // Gas at the deepest point; null when the log doesn't name the gas
   min_o2?: number | null; // leanest gas breathed, % oxygen
   max_po2?: number | null; // bar

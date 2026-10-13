@@ -13,7 +13,89 @@ import { lazy, Suspense } from "react";
 const SingleDiveView = lazy(() =>
   import("@/components/SingleDiveView").then((m) => ({ default: m.SingleDiveView }))
 );
-import type { ChatMessage, DashboardData, DiverProfile, DonationReceipt } from "@/types";
+import type {
+  ChatMessage,
+  DashboardData,
+  DiveFeature,
+  DiverProfile,
+  DonationReceipt,
+  MetricRange,
+} from "@/types";
+
+const DESCRIPTIVE_KINDS = new Set(["depth", "sac", "temp"]);
+
+/** Older shared snapshots carry no class: fall back to which metric it is. */
+function isDescriptive(metric: MetricRange): boolean {
+  if (metric.kind) return metric.kind === "descriptive";
+  return DESCRIPTIVE_KINDS.has(metricKind(metric.label) ?? "");
+}
+
+function MetricPanel({
+  title,
+  note,
+  metrics,
+  exposure,
+  footer,
+}: {
+  title: string;
+  note: string;
+  metrics: MetricRange[];
+  exposure?: Record<string, number>;
+  footer?: React.ReactNode;
+}) {
+  if (metrics.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="text-xs text-muted-foreground">{note}</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {metrics.map((metric) => (
+          <Card key={metric.label}>
+            <CardContent className="pt-4">
+              {metricKind(metric.label) === "temp" ? (
+                <TemperatureGauge metric={metric} exposure={exposure} />
+              ) : (
+                <RangeGauge metric={metric} />
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      {footer}
+    </div>
+  );
+}
+
+// Underwater time above a required stop shorter than this is waves or sensor noise.
+const MISSED_STOP_MIN = 0.5;
+
+/**
+ * Deco as a limit: going into deco breaks nothing, not keeping a required
+ * stop does. Technical dives plan their deco and aren't counted as entries.
+ */
+function DecoStops({ dives }: { dives: DiveFeature[] }) {
+  const missed = dives.filter(
+    (d) => (d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0
+  ).length;
+  const entered = dives.filter((d) => d.entered_deco && !d.technical).length;
+  if (missed === 0 && entered === 0) return null;
+  const dive = (n: number) => `${n} ${n === 1 ? "dive" : "dives"}`;
+  return (
+    <p className="mt-3 text-xs text-muted-foreground">
+      <span className="font-medium text-foreground">Deco stops: </span>
+      {missed > 0 ? (
+        <span className="font-semibold text-danger">{dive(missed)} missed a required stop</span>
+      ) : (
+        <span>
+          {dive(entered)} went into deco, every required stop kept. Running the NDL to zero breaks no limit;
+          skipping the stop would.
+        </span>
+      )}
+    </p>
+  );
+}
 
 // Temperature labels that belong in the temperature gauge, not Water Types
 const TEMP_WATER_TYPES = new Set(["Cold water", "Temperate", "Tropical"]);
@@ -72,22 +154,18 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
           </Suspense>
         ) : (
           <>
-            <div>
-              <h2 className="mb-4 text-lg font-semibold">Dive Metrics</h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {data.metrics.map((metric) => (
-                  <Card key={metric.label}>
-                    <CardContent className="pt-4">
-                      {metricKind(metric.label) === "temp" ? (
-                        <TemperatureGauge metric={metric} exposure={data.diver_profile?.temp_exposure} />
-                      ) : (
-                        <RangeGauge metric={metric} />
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
+            <MetricPanel
+              title="Your Diving"
+              note="What your dives look like. No good or bad here."
+              metrics={data.metrics.filter(isDescriptive)}
+              exposure={data.diver_profile?.temp_exposure}
+            />
+            <MetricPanel
+              title="Limits"
+              note="Lines any diver is held to. Red is a limit broken."
+              metrics={data.metrics.filter((m) => !isDescriptive(m))}
+              footer={<DecoStops dives={data.all_dives} />}
+            />
 
             {worst.length > 0 && (
               <div>

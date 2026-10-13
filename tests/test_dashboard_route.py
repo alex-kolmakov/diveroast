@@ -11,7 +11,6 @@ from src.api.routes.dashboard import (
     PICK_REASONS,
     _categories_by_severity,
     _classify_experience,
-    _classify_ndl_zone,
     _classify_region,
     _classify_water_type,
     _classify_zone,
@@ -54,17 +53,6 @@ class TestClassifyZone:
 
     def test_boundary_warning(self):
         assert _classify_zone(30.0, 18.0, 30.0) == "warning"
-
-
-class TestClassifyNdlZone:
-    def test_safe(self):
-        assert _classify_ndl_zone(15.0) == "safe"
-
-    def test_warning(self):
-        assert _classify_ndl_zone(7.0) == "warning"
-
-    def test_danger(self):
-        assert _classify_ndl_zone(3.0) == "danger"
 
 
 class TestComputeDangerScore:
@@ -339,7 +327,9 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
     kinds = {m["label"]: m["kind"] for m in data["metrics"]}
     assert kinds["Max Depth"] == "descriptive"
     assert kinds["SAC Rate"] == "descriptive"
-    assert kinds["Min NDL"] == "margin"
+    # NDL is a margin, not a limit: it has no gauge
+    assert "Min NDL" not in kinds
+    assert list(kinds.values()) == ["descriptive"] * 3 + ["limit"] * 3
     assert kinds["Oxygen Pressure at Depth"] == "limit"
     depth = next(m for m in data["metrics"] if m["label"] == "Max Depth")
     assert depth["zone"] == "safe"

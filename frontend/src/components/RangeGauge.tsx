@@ -12,9 +12,11 @@ const ZONE_COLORS = {
   danger: "bg-danger",
 };
 
-const COLD_COLOR = "#3b82f6";
-const TEMPERATE_COLOR = "#22c55e";
-const TROPICAL_COLOR = "#ef4444";
+// Temperature is a fact about the water, so its colours stay clear of the
+// green, amber and red the limit gauges use.
+const COLD_COLOR = "#60a5fa";
+const TEMPERATE_COLOR = "#2dd4bf";
+const TROPICAL_COLOR = "#f472b6";
 
 const fmt = (v: number | null, places = 1) => (v == null ? "–" : v.toFixed(places));
 
