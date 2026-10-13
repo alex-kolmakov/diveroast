@@ -48,3 +48,44 @@ def test_rebreather_sets_its_own_oxygen_pressure():
     loop = _gas(40.0, 21.0, dive_mode="CCR")
     assert np.isnan(loop["max_po2"])
     assert np.isnan(loop["gas_density"])
+
+
+# --- How depth is judged --------------------------------------------------------
+
+
+def _deep(depth: float, o2: float) -> dict:
+    row = {"max_depth": depth, "min_o2": o2, "min_ndl": 20.0}
+    return {**row, **gas_at_depth(row)}
+
+
+def test_depth_alone_is_never_a_finding():
+    from src.tools.dive import dive_findings
+
+    assert dive_findings(_deep(30.0, 21.0)) == {}
+
+
+def test_deep_air_dive_is_a_thin_margin_not_a_limit():
+    from src.tools.dive import MARGIN, dive_findings
+
+    found = dive_findings(_deep(39.0, 21.0))
+    assert found == {"gas density": (MARGIN, 2.0)}
+
+
+def test_nitrox_past_its_working_limit_is_a_limit_broken():
+    from src.tools.dive import LIMIT, dive_findings, dive_issues
+
+    row = _deep(36.0, 32.0)
+    assert dive_findings(row)["oxygen pressure"] == (LIMIT, 3.0)
+    assert any(i.startswith("OXYGEN PRESSURE: 1.47 bar") for i in dive_issues(row))
+
+
+def test_habits_file_depth_under_facts():
+    import pandas as pd
+
+    from src.tools.dive import habit_lines
+
+    features = pd.DataFrame([_deep(35.0, 21.0), _deep(12.0, 21.0)])
+    limits, margins, facts = habit_lines(features)
+    assert limits == "Limits broken: none"
+    assert "gas density over the recommended 5.2 g/L" in margins
+    assert facts == "Facts, not faults: deeper than 30 m 1/2 dives (50%)"

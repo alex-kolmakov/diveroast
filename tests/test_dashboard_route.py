@@ -77,16 +77,17 @@ class TestComputeDangerScore:
         }
         assert _compute_danger_score(row) == 0.0
 
-    def test_all_danger(self):
+    def test_limits_and_margins(self):
         row = {
             "min_ndl": 2,
             "max_ascend_speed": 15,
             "sac_rate": 25,
-            "max_depth": 40,
+            "max_depth": 38,
         }
         score = _compute_danger_score(row)
-        # NDL danger: 3*2=6, ascent danger: 2*2=4, SAC danger: 1*2=2, depth danger: 1*2=2
-        assert score == 14.0
+        # Ascent limit broken: 2*2=4. NDL under 5 min is a thin margin: 2.
+        # Air consumption and depth on their own are facts: 0.
+        assert score == 6.0
 
     def test_warning_level(self):
         row = {
@@ -96,8 +97,19 @@ class TestComputeDangerScore:
             "max_depth": 25,
         }
         score = _compute_danger_score(row)
-        # NDL warning: 3, ascent warning: 2, SAC warning: 1, depth warning: 1
-        assert score == 7.0
+        # Ascent near the limit: 2. NDL under 10 min, a thin margin: 1.
+        assert score == 3.0
+
+    def test_a_deep_dive_inside_its_gas_limits_scores_nothing(self):
+        deep = {"max_depth": 38, "max_po2": 1.01, "gas_density": 6.1, "min_ndl": 20}
+        assert _compute_danger_score({**deep, "gas_density": 5.0}) == 0.0
+        # Dense gas is a thin margin, not a limit.
+        assert _compute_danger_score(deep) == 1.0
+
+    def test_oxygen_pressure_is_a_limit(self):
+        base = {"max_depth": 36, "min_ndl": 20}
+        assert _compute_danger_score({**base, "max_po2": 1.45}) == 3.0
+        assert _compute_danger_score({**base, "max_po2": 1.65}) == 6.0
 
     def test_bolt_to_surface_scores_like_a_sustained_fast_ascent(self):
         calm = {"max_ascend_speed": 6, "max_shallow_ascend_speed": 6, "max_depth": 12}
@@ -132,13 +144,8 @@ class TestIdentifyIssues:
             "sac_rate": 22,
             "max_depth": 35,
         }
-        issues = _identify_issues(row)
-        assert issues == [
-            "rapid ascent",
-            "low NDL",
-            "high air consumption",
-            "deep dive",
-        ]
+        # Limits first, then margins; air consumption and depth are facts.
+        assert _identify_issues(row) == ["rapid ascent", "low NDL"]
 
 
 class TestPickOrder:
@@ -162,10 +169,11 @@ class TestPickOrder:
         ]
 
     def test_gas_and_stop_issues_score(self):
-        assert _compute_danger_score({**self.CALM, "end_pressure": 40}) == 2.0
-        assert _compute_danger_score({**self.CALM, "end_pressure": 10}) == 4.0
-        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 2}) == 2.0
-        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 0.5}) == 4.0
+        # Thin margins: 1 point, 2 at the far end. Never as much as a limit.
+        assert _compute_danger_score({**self.CALM, "end_pressure": 40}) == 1.0
+        assert _compute_danger_score({**self.CALM, "end_pressure": 10}) == 2.0
+        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 2}) == 1.0
+        assert _compute_danger_score({**self.CALM, "safety_stop_minutes": 0.5}) == 2.0
         assert _compute_danger_score({**self.CALM, "redescents": 3}) == 2.0
 
     def test_new_issues_are_identified(self):
@@ -176,19 +184,25 @@ class TestPickOrder:
         row = {**self.CALM, "end_pressure": None, "safety_stop_minutes": None}
         assert _compute_danger_score(row) == 0.0
 
-    def test_an_empty_tank_outranks_a_slightly_fast_ascent(self):
+    def test_a_broken_limit_outranks_a_thin_margin(self):
         scored = self._scored(
-            {**self.CALM, "max_ascend_speed": 9.5},
             {**self.CALM, "end_pressure": 10},
-        )
-        assert _categories_by_severity(scored)[0] == "low gas reserve"
-
-    def test_ties_go_to_the_more_serious_issue(self):
-        scored = self._scored(
             {**self.CALM, "max_ascend_speed": 12},
-            {**self.CALM, "end_pressure": 10},
         )
-        assert _categories_by_severity(scored) == ["low gas reserve", "rapid ascent"]
+        assert _categories_by_severity(scored) == ["rapid ascent", "low gas reserve"]
+
+    def test_ties_go_to_the_limit(self):
+        scored = self._scored(
+            {**self.CALM, "end_pressure": 10},
+            {**self.CALM, "max_ascend_speed": 9.5},
+        )
+        assert _categories_by_severity(scored) == ["rapid ascent", "low gas reserve"]
+
+    def test_depth_and_air_consumption_never_pick_a_dive(self):
+        assert "deep dive" not in ISSUE_RANK_KEY
+        assert "high air consumption" not in ISSUE_RANK_KEY
+        scored = self._scored({**self.CALM, "max_depth": 38, "sac_rate": 30})
+        assert _categories_by_severity(scored) == []
 
     def test_both_ascent_tiers_share_one_family(self):
         assert ISSUE_FAMILY["rapid ascent"] == ISSUE_FAMILY["bolted to surface"]
@@ -317,7 +331,18 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
     reasons = [d["pick_reason"] for d in data["top_problematic_dives"]]
     assert len(set(reasons)) == len(reasons)
     assert sum("ascent" in r or "bolt" in r for r in reasons) <= 1
-    assert "Lowest gas reserve" in reasons
+    assert not any("Deepest dive with issues" in r or "air" in r for r in reasons)
+    for dive in data["top_problematic_dives"]:
+        assert dive["pick_class"] in ("limit", "margin")
+
+    # Gauges say what kind of number they show
+    kinds = {m["label"]: m["kind"] for m in data["metrics"]}
+    assert kinds["Max Depth"] == "descriptive"
+    assert kinds["SAC Rate"] == "descriptive"
+    assert kinds["Min NDL"] == "margin"
+    assert kinds["Oxygen Pressure at Depth"] == "limit"
+    depth = next(m for m in data["metrics"] if m["label"] == "Max Depth")
+    assert depth["zone"] == "safe"
 
     # Problematic dives have summary and pick_reason
     for dive in data["top_problematic_dives"]:

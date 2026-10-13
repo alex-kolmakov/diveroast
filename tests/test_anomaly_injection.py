@@ -72,16 +72,14 @@ def test_agent_keywords_low_ndl():
     assert "close to deco stop NDL almost zero recreational limit" in kw
 
 
-def test_agent_keywords_high_sac():
+def test_agent_keywords_air_consumption_is_a_fact_not_an_anomaly():
     agent = _make_agent(_make_features(sac_rate=25.0))
-    kw = agent._build_anomaly_keywords()
-    assert "high air consumption SAC rate breathing" in kw
+    assert agent._build_anomaly_keywords() == ""
 
 
-def test_agent_keywords_deep_dive():
+def test_agent_keywords_depth_alone_is_a_fact_not_an_anomaly():
     agent = _make_agent(_make_features(max_depth=35.0))
-    kw = agent._build_anomaly_keywords()
-    assert "deep diving incident" in kw
+    assert agent._build_anomaly_keywords() == ""
 
 
 def test_agent_keywords_clean_diver():
@@ -110,8 +108,8 @@ def test_agent_keywords_multiple_anomalies():
     kw = agent._build_anomaly_keywords()
     assert "rapid ascent decompression sickness" in kw
     assert "close to deco stop" in kw
-    assert "high air consumption SAC rate breathing" in kw
-    assert "deep diving incident" in kw
+    assert "air consumption" not in kw
+    assert "deep diving" not in kw
 
 
 # ---------------------------------------------------------------------------

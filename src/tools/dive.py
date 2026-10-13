@@ -18,6 +18,10 @@ from src.analysis.feature_engineering import (
     ASCENT_LIMIT_M_MIN,
     ASCENT_WINDOW_S,
     COLD_WATER_C,
+    GAS_DENSITY_MAX_G_L,
+    GAS_DENSITY_RECOMMENDED_G_L,
+    PO2_LIMIT_BAR,
+    PO2_WORKING_BAR,
     REDESCENT_M,
     SHALLOW_ASCENT_LIMIT_M_MIN,
     SHALLOW_ZONE_M,
@@ -122,6 +126,97 @@ def profile_flags(row) -> dict[str, bool]:
         "surfaced_mid_dive": deep_enough and measured(surfacings) and surfacings >= 1,
         "fast_descent": measured(descent) and descent > FAST_DESCENT_M_MIN,
     }
+
+
+# What the log measures falls into three classes:
+#   LIMIT   - a rule any diver is held to: an ascent limit, a required deco
+#             stop, the oxygen limit of the gas breathed.
+#   MARGIN  - how close the diver ran to a limit or a recommendation. It
+#             depends on training and plan, so it is a choice to remark on,
+#             never a limit broken. Gas density is here too: air at 40 m is
+#             past the researched 6.2 g/L maximum, yet inside what every
+#             agency trains divers to do.
+#   everything else is descriptive (depth on its own, air consumption,
+#   temperature, descent rate): a fact about the diver, with no good or bad.
+LIMIT = "limit"
+MARGIN = "margin"
+RECREATIONAL_MAX_M = 40.0  # beyond the range recreational training covers
+NDL_MARGIN_MIN = 10.0
+RESERVE_THIN_BAR = 30.0
+SAFETY_STOP_THIN_MIN = 1.0
+SAWTOOTH_MANY_REDESCENTS = 3
+SUSTAINED_ASCENT_WATCH_M_MIN = 9.0  # the stricter of the two usual ascent limits
+BOLT_HARD_M_MIN = 15.0
+
+
+def gas_flags(row) -> dict[str, bool]:
+    """How the gas at the deepest point sits against its limits. NaN never flags."""
+    po2 = row.get("max_po2")
+    density = row.get("gas_density")
+    return {
+        "po2_over_working": measured(po2) and po2 > PO2_WORKING_BAR,
+        "po2_over_limit": measured(po2) and po2 > PO2_LIMIT_BAR,
+        "density_over_recommended": measured(density)
+        and density > GAS_DENSITY_RECOMMENDED_G_L,
+        "density_over_max": measured(density) and density > GAS_DENSITY_MAX_G_L,
+    }
+
+
+def dive_findings(row) -> dict[str, tuple[str, float]]:
+    """What a dive is judged on: {finding: (class, points)}.
+
+    A limit scores its weight (2, or 3 for deco and oxygen) times how far
+    past the limit the dive went; a margin scores 1 or 2. Descriptive facts
+    and unrecorded metrics score nothing and aren't findings.
+    """
+    found: dict[str, tuple[str, float]] = {}
+    deco = deco_flags(row)
+    gas = gas_flags(row)
+    profile = profile_flags(row)
+    ndl = row.get("min_ndl")
+    ascent = row.get("max_ascend_speed")
+    surfacing = row.get("max_shallow_ascend_speed")
+
+    # Limits
+    if deco["missed_stop"] or deco["surfaced_owing"]:
+        found["missed deco stop"] = (LIMIT, 9.0)
+    if gas["po2_over_limit"]:
+        found["oxygen pressure"] = (LIMIT, 6.0)
+    elif gas["po2_over_working"]:
+        found["oxygen pressure"] = (LIMIT, 3.0)
+    if measured(ascent) and ascent > ASCENT_LIMIT_M_MIN:
+        found["rapid ascent"] = (LIMIT, 4.0)
+    elif measured(ascent) and ascent > SUSTAINED_ASCENT_WATCH_M_MIN:
+        found["rapid ascent"] = (LIMIT, 2.0)
+    if measured(surfacing) and surfacing > BOLT_HARD_M_MIN:
+        found["bolted to surface"] = (LIMIT, 4.0)
+    elif measured(surfacing) and surfacing > SHALLOW_ASCENT_LIMIT_M_MIN:
+        found["bolted to surface"] = (LIMIT, 2.0)
+
+    # Margins. A technical dive plans its deco, so deco entry and low NDL
+    # only count on a recreational dive, and not once a stop was missed.
+    if "missed deco stop" in found or deco["technical"]:
+        pass
+    elif row.get("entered_deco") or (measured(ndl) and ndl < NDL_DANGER_MIN):
+        found["low NDL"] = (MARGIN, 2.0)
+    elif measured(ndl) and ndl < NDL_MARGIN_MIN:
+        found["low NDL"] = (MARGIN, 1.0)
+    if profile["low_reserve"]:
+        thin = row["end_pressure"] < RESERVE_THIN_BAR
+        found["low gas reserve"] = (MARGIN, 2.0 if thin else 1.0)
+    if profile["short_stop"]:
+        thin = row["safety_stop_minutes"] < SAFETY_STOP_THIN_MIN
+        found["short safety stop"] = (MARGIN, 2.0 if thin else 1.0)
+    if profile["surfaced_mid_dive"]:
+        found["surfaced mid-dive"] = (MARGIN, 2.0)
+    if profile["sawtooth"]:
+        many = row["redescents"] >= SAWTOOTH_MANY_REDESCENTS
+        found["sawtooth profile"] = (MARGIN, 2.0 if many else 1.0)
+    if gas["density_over_recommended"]:
+        found["gas density"] = (MARGIN, 2.0 if gas["density_over_max"] else 1.0)
+    if (row.get("max_depth") or 0) > RECREATIONAL_MAX_M and not deco["technical"]:
+        found["deeper than 40 m"] = (MARGIN, 1.0)
+    return found
 
 
 def measured(value) -> bool:
@@ -238,6 +333,15 @@ def describe_features(row) -> str:
             f"thermocline {fmt(row['temp_gradient'], unit=' °C')} "
             f"(shallows warmer than the bottom)"
         )
+    if measured(row.get("max_po2")):
+        parts.append(
+            f"oxygen partial pressure at the deepest point "
+            f"{fmt(row['max_po2'], '.2f', ' bar')} on {row['min_o2']:.0f}% oxygen"
+        )
+    if measured(row.get("gas_density")):
+        parts.append(
+            f"gas density at the deepest point {fmt(row['gas_density'], unit=' g/L')}"
+        )
     if measured(row.get("max_descent_speed")):
         parts.append(
             f"max descent rate {fmt(row['max_descent_speed'], unit=' m/min')} "
@@ -336,46 +440,56 @@ def dive_issues(row) -> list[str]:
         and row["min_ndl"] < NDL_DANGER_MIN
     ):
         issues.append(
-            f"DANGEROUSLY LOW NDL: Minimum NDL dropped to {row['min_ndl']:.0f} minutes. "
-            f"This is cutting it extremely close to mandatory decompression."
+            f"THIN MARGIN, LOW NDL: Minimum NDL dropped to {row['min_ndl']:.0f} minutes, "
+            f"close to mandatory decompression but inside the no-stop limit."
         )
-    if measured(row.get("sac_rate")) and row["sac_rate"] > SAC_HIGH_L_MIN:
-        issues.append(
-            f"HIGH AIR CONSUMPTION: SAC rate of {row['sac_rate']:.1f} L/min is above "
-            f"{SAC_HIGH_L_MIN:.0f} L/min. Consider working on breathing technique and buoyancy."
+    gas = gas_flags(row)
+    if gas["po2_over_working"]:
+        over = (
+            f"over the {PO2_LIMIT_BAR:.1f} bar contingency limit"
+            if gas["po2_over_limit"]
+            else f"over the {PO2_WORKING_BAR:.1f} bar working limit "
+            f"(contingency limit {PO2_LIMIT_BAR:.1f} bar)"
         )
-    if row.get("max_depth", 0) > DEEP_M:
         issues.append(
-            f"DEEP DIVE: Maximum depth of {row['max_depth']:.1f}m. "
-            f"Ensure you have appropriate training and gas planning for this depth."
+            f"OXYGEN PRESSURE: {row['max_po2']:.2f} bar at {row['max_depth']:.1f} m "
+            f"on {row['min_o2']:.0f}% oxygen, {over}. Oxygen toxicity risk rises "
+            f"with oxygen pressure."
+        )
+    if gas["density_over_max"]:
+        issues.append(
+            f"THIN MARGIN, GAS DENSITY: {row['gas_density']:.1f} g/L at the deepest "
+            f"point, over the {GAS_DENSITY_MAX_G_L:.1f} g/L that research gives as "
+            f"the maximum. Dense gas is harder to breathe and CO2 builds up."
+        )
+    elif gas["density_over_recommended"]:
+        issues.append(
+            f"THIN MARGIN, GAS DENSITY: {row['gas_density']:.1f} g/L at the deepest "
+            f"point, above the recommended {GAS_DENSITY_RECOMMENDED_G_L:.1f} g/L and "
+            f"under the {GAS_DENSITY_MAX_G_L:.1f} g/L maximum."
         )
     profile = profile_flags(row)
     if profile["low_reserve"]:
         issues.append(
-            f"LOW GAS RESERVE: the last tank reading underwater was "
+            f"THIN MARGIN, GAS RESERVE: the last tank reading underwater was "
             f"{row['end_pressure']:.0f} bar, below the usual {RESERVE_BAR:.0f} bar "
             f"reserve. The log doesn't show the tank size or the plan."
         )
     if profile["short_stop"]:
         issues.append(
-            f"SHORT SAFETY STOP: {row['safety_stop_minutes']:.1f} min between 3 and "
+            f"THIN MARGIN, SAFETY STOP: {row['safety_stop_minutes']:.1f} min between 3 and "
             f"6 m before surfacing from {row['max_depth']:.1f} m (usual: "
             f"{SAFETY_STOP_MIN:.0f} min at 5 m)."
         )
     if profile["surfaced_mid_dive"]:
         issues.append(
-            f"SURFACED MID-DIVE: came up to the surface and went back down "
+            f"THIN MARGIN, SURFACED MID-DIVE: came up to the surface and went back down "
             f"{int(row['mid_dive_surfacings'])} time(s)."
         )
     if profile["sawtooth"]:
         issues.append(
-            f"SAWTOOTH PROFILE: {int(row['redescents'])} re-descents of "
+            f"THIN MARGIN, SAWTOOTH PROFILE: {int(row['redescents'])} re-descents of "
             f"{REDESCENT_M:.0f} m or more after ascending."
-        )
-    if profile["fast_descent"]:
-        issues.append(
-            f"FAST DESCENT: {row['max_descent_speed']:.1f} m/min averaged over "
-            f"{ASCENT_WINDOW_S:.0f} s, which leaves little time to equalize."
         )
     flags = thermal_flags(row)
     if flags["prolonged_cold"]:
@@ -502,7 +616,6 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         return f"{count}/{of} {what} ({count * 100 // of}%)"
 
     ndl = features["min_ndl"]
-    sac = features["sac_rate"]
     surfacing = features["max_shallow_ascend_speed"]
     concern_lines = [
         f"High sustained ascent rate (>{ASCENT_LIMIT_M_MIN:.0f} m/min over "
@@ -512,11 +625,8 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"the last {SHALLOW_ZONE_M:.0f} m): "
         f"{_pct(int((surfacing > SHALLOW_ASCENT_LIMIT_M_MIN).sum()), n)}",
         *_deco_concerns(features, n, _pct),
-        f"Low NDL (<{NDL_DANGER_MIN:.0f} min): "
+        f"NDL under {NDL_DANGER_MIN:.0f} min (a thin margin, not a limit broken): "
         f"{_pct(int((ndl < NDL_DANGER_MIN).sum()), cov['ndl'], 'dives with NDL')}",
-        f"High SAC (>{SAC_HIGH_L_MIN:.0f} L/min): "
-        f"{_pct(int((sac > SAC_HIGH_L_MIN).sum()), cov['sac'], 'dives with SAC')}",
-        f"Deep dives (>{DEEP_M:.0f}m): {_pct(int((features['max_depth'] > DEEP_M).sum()), n)}",
     ]
     if "cold_minutes" in features.columns:
         temps = int(features["water_min_temp"].notna().sum())
@@ -546,7 +656,7 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
             "Safety Concerns:",
             *[f"  {line}" for line in concern_lines],
             "",
-            "Habits (share of the dives where each could be measured, most common first):",
+            "What the log shows (share of the dives where each could be measured):",
             *[f"  {line}" for line in habit_lines(features)],
             "",
             f"Top Worst Offenders (sustained ascent, {ASCENT_WINDOW_S:.0f} s):",
@@ -574,95 +684,148 @@ def _deco_concerns(features: pd.DataFrame, n: int, pct) -> list[str]:
     ]
 
 
-def habit_counts(features: pd.DataFrame) -> list[tuple[str, int, int]]:
-    """(habit, dives showing it, dives where it could be measured).
+FACT = "fact"
+HABIT_HEADINGS = {
+    LIMIT: "Limits broken",
+    MARGIN: "Thin margins (the diver's call, not a limit broken)",
+    FACT: "Facts, not faults",
+}
+
+
+def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
+    """(class, habit, dives showing it, dives where it could be measured).
 
     Most common share first, habits no dive shows left out. Lets a reader
-    tell what the log keeps repeating from what happened once.
+    tell what the log keeps repeating from what happened once, and a broken
+    limit from a thin margin or a plain fact.
     """
     n = len(features)
 
     def col(name: str) -> pd.Series:
         return features[name] if name in features.columns else pd.Series(dtype=float)
 
+    def count(mask) -> int:
+        return int(mask.sum())
+
     deco = features.apply(deco_flags, axis=1, result_type="expand")
     thermal = features.apply(thermal_flags, axis=1, result_type="expand")
     profile = features.apply(profile_flags, axis=1, result_type="expand")
+    gas = features.apply(gas_flags, axis=1, result_type="expand")
     recreational = ~deco["technical"]
-    below_stop_depth = int((features["max_depth"] > STOP_EXPECTED_BELOW_M).sum())
+    below_stop_depth = count(features["max_depth"] > STOP_EXPECTED_BELOW_M)
     low_ndl = (
         recreational & ~deco["recreational_deco"] & (col("min_ndl") < NDL_DANGER_MIN)
     )
-    temps = int(col("water_min_temp").notna().sum())
+    temps = count(col("water_min_temp").notna())
+    po2_known = count(col("max_po2").notna())
     habits = [
         (
-            f"ended below {RESERVE_BAR:.0f} bar",
-            int(profile["low_reserve"].sum()),
-            int((col("end_pressure").notna() & recreational).sum()),
-        ),
-        (
-            "entered deco on a recreational dive",
-            int(deco["recreational_deco"].sum()),
-            n,
-        ),
-        (
+            LIMIT,
             "missed a deco stop or surfaced owing one",
-            int((deco["missed_stop"] | deco["surfaced_owing"]).sum()),
+            count(deco["missed_stop"] | deco["surfaced_owing"]),
             n,
         ),
         (
-            f"NDL under {NDL_DANGER_MIN:.0f} min",
-            int(low_ndl.sum()),
-            int(col("min_ndl").notna().sum()),
+            LIMIT,
+            f"oxygen pressure over the {PO2_WORKING_BAR:.1f} bar working limit",
+            count(gas["po2_over_working"]),
+            po2_known,
         ),
         (
+            LIMIT,
             f"bolted to the surface (over {SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min "
             f"from the safety stop)",
-            int((col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN).sum()),
-            int(col("max_shallow_ascend_speed").notna().sum()),
+            count(col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN),
+            count(col("max_shallow_ascend_speed").notna()),
         ),
         (
+            LIMIT,
             f"sustained ascent over {ASCENT_LIMIT_M_MIN:.0f} m/min",
-            int((col("max_ascend_speed") > ASCENT_LIMIT_M_MIN).sum()),
-            int(col("max_ascend_speed").notna().sum()),
+            count(col("max_ascend_speed") > ASCENT_LIMIT_M_MIN),
+            count(col("max_ascend_speed").notna()),
         ),
         (
+            MARGIN,
+            f"ended below {RESERVE_BAR:.0f} bar",
+            count(profile["low_reserve"]),
+            count(col("end_pressure").notna() & recreational),
+        ),
+        (
+            MARGIN,
+            "entered deco on a recreational dive",
+            count(deco["recreational_deco"]),
+            n,
+        ),
+        (
+            MARGIN,
+            f"NDL under {NDL_DANGER_MIN:.0f} min",
+            count(low_ndl),
+            count(col("min_ndl").notna()),
+        ),
+        (
+            MARGIN,
             f"safety stop under {SAFETY_STOP_MIN:.0f} min",
-            int(profile["short_stop"].sum()),
-            int(col("safety_stop_minutes").notna().sum()),
+            count(profile["short_stop"]),
+            count(col("safety_stop_minutes").notna()),
         ),
-        ("sawtooth profile", int(profile["sawtooth"].sum()), below_stop_depth),
+        (MARGIN, "sawtooth profile", count(profile["sawtooth"]), below_stop_depth),
         (
+            MARGIN,
             "surfaced mid-dive",
-            int(profile["surfaced_mid_dive"].sum()),
+            count(profile["surfaced_mid_dive"]),
             below_stop_depth,
         ),
         (
-            f"descent over {FAST_DESCENT_M_MIN:.0f} m/min",
-            int(profile["fast_descent"].sum()),
-            int(col("max_descent_speed").notna().sum()),
+            MARGIN,
+            f"gas density over the recommended {GAS_DENSITY_RECOMMENDED_G_L:.1f} g/L "
+            f"at depth",
+            count(gas["density_over_recommended"]),
+            po2_known,
         ),
         (
-            f"SAC over {SAC_HIGH_L_MIN:.0f} L/min",
-            int((col("sac_rate") > SAC_HIGH_L_MIN).sum()),
-            int(col("sac_rate").notna().sum()),
+            MARGIN,
+            f"deeper than {RECREATIONAL_MAX_M:.0f} m",
+            count((features["max_depth"] > RECREATIONAL_MAX_M) & recreational),
+            n,
         ),
-        (f"deeper than {DEEP_M:.0f} m", int((features["max_depth"] > DEEP_M).sum()), n),
-        ("prolonged cold", int(thermal["prolonged_cold"].sum()), temps),
-        ("cold stops", int(thermal["cold_stops"].sum()), temps),
-        ("long warm-water dive", int(thermal["long_warm"].sum()), temps),
+        (MARGIN, "prolonged cold", count(thermal["prolonged_cold"]), temps),
+        (MARGIN, "cold stops", count(thermal["cold_stops"]), temps),
+        (FACT, f"deeper than {DEEP_M:.0f} m", count(features["max_depth"] > DEEP_M), n),
+        (
+            FACT,
+            f"SAC over {SAC_HIGH_L_MIN:.0f} L/min",
+            count(col("sac_rate") > SAC_HIGH_L_MIN),
+            count(col("sac_rate").notna()),
+        ),
+        (
+            FACT,
+            f"descent over {FAST_DESCENT_M_MIN:.0f} m/min",
+            count(profile["fast_descent"]),
+            count(col("max_descent_speed").notna()),
+        ),
+        (FACT, "long warm-water dive", count(thermal["long_warm"]), temps),
     ]
-    shown = [h for h in habits if h[1] > 0 and h[2] > 0]
-    return sorted(shown, key=lambda h: h[1] / h[2], reverse=True)
+    shown = [h for h in habits if h[2] > 0 and h[3] > 0]
+    return sorted(shown, key=lambda h: h[2] / h[3], reverse=True)
+
+
+def _share(count: int, of: int) -> str:
+    percent = count * 100 // of
+    return f"{percent}%" if percent else "under 1%"
 
 
 def habit_lines(features: pd.DataFrame) -> list[str]:
-    """One line per habit the log shows, most common first."""
-    lines = [
-        f"{habit}: {count}/{of} dives ({count * 100 // of}%)"
-        for habit, count, of in habit_counts(features)
-    ]
-    return lines or ["none flagged"]
+    """One line per class: what the log shows, most common first."""
+    habits = habit_counts(features)
+    lines = []
+    for cls, heading in HABIT_HEADINGS.items():
+        items = [
+            f"{habit} {count}/{of} dives ({_share(count, of)})"
+            for habit_cls, habit, count, of in habits
+            if habit_cls == cls
+        ]
+        lines.append(f"{heading}: {'; '.join(items) if items else 'none'}")
+    return lines
 
 
 # DAN is searched once per phrase and each search adds material to the turn,
@@ -675,7 +838,8 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
 
     The most common anomalies come first and at most ``MAX_ANOMALY_QUERIES``
     are kept, so the material follows what this log repeats. A missed or
-    skipped deco stop always leads. NaN never triggers a phrase.
+    skipped deco stop always leads. Descriptive facts (depth on its own, air
+    consumption) aren't anomalies. NaN never triggers a phrase.
     """
     if features is None or features.empty:
         return []
@@ -695,6 +859,7 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
     )
     thermal = features.apply(thermal_flags, axis=1, result_type="expand")
     profile = features.apply(profile_flags, axis=1, result_type="expand")
+    gas = features.apply(gas_flags, axis=1, result_type="expand")
     always = pd.Series(True, index=features.index)
     never = pd.Series(False, index=features.index)
     missed = deco["missed_stop"] | deco["surfaced_owing"] if has_deco else never
@@ -725,8 +890,10 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
             profile["sawtooth"] | profile["surfaced_mid_dive"],
             "sawtooth profile repeated ascents yo-yo diving",
         ),
-        (col("sac_rate") > SAC_HIGH_L_MIN, "high air consumption SAC rate breathing"),
-        (features["max_depth"] > DEEP_M, "deep diving incident"),
+        (
+            gas["po2_over_working"],
+            "oxygen toxicity nitrox maximum operating depth exceeded",
+        ),
         (
             thermal["prolonged_cold"],
             "hypothermia cold water exposure thermal protection",

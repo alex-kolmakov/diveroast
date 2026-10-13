@@ -178,8 +178,10 @@ def test_drills_on_a_shallow_dive_are_not_a_sawtooth():
 
 def test_dive_issues_name_the_number_behind_each_flag():
     issues = dive_issues(_flagged(end_pressure=15.0, safety_stop_minutes=0.7))
-    assert any(i.startswith("LOW GAS RESERVE") and "15 bar" in i for i in issues)
-    assert any(i.startswith("SHORT SAFETY STOP") and "0.7 min" in i for i in issues)
+    assert any("GAS RESERVE" in i and "15 bar" in i for i in issues)
+    assert any("SAFETY STOP" in i and "0.7 min" in i for i in issues)
+    # Neither broke a limit, and the model is told so.
+    assert all(i.startswith("THIN MARGIN") for i in issues)
 
 
 def _log() -> pd.DataFrame:
@@ -200,10 +202,13 @@ def _log() -> pd.DataFrame:
 
 
 def test_habits_rank_what_the_log_repeats_first():
-    lines = habit_lines(extract_features(_log()))
-    assert lines[0] == "ended below 50 bar: 3/4 dives (75%)"
-    assert "safety stop under 3 min: 1/4 dives (25%)" in lines
-    assert not any("ascent" in line for line in lines)
+    limits, margins, facts = habit_lines(extract_features(_log()))
+    assert limits == "Limits broken: none"
+    assert margins.startswith("Thin margins")
+    assert margins.index("ended below 50 bar 3/4 dives (75%)") < margins.index(
+        "safety stop under 3 min 1/4 dives (25%)"
+    )
+    assert facts == "Facts, not faults: none"
 
 
 def test_anomaly_queries_cover_gas_and_stops():
@@ -229,7 +234,8 @@ def test_seed_context_carries_the_habits_line():
     agent = DiverRoastAgent()
     agent.set_dive_data(_log())
     context = agent.history[0].parts[0].text
-    assert "ended below 50 bar: 3/4 dives (75%)" in context
+    assert "ended below 50 bar 3/4 dives (75%)" in context
+    assert "Limits broken: none" in context
     assert "ended below 50 bar" in agent.log_facts
 
 

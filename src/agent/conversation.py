@@ -23,6 +23,10 @@ from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
 from src.analysis.feature_engineering import (
     COLD_WATER_C,
+    GAS_DENSITY_MAX_G_L,
+    GAS_DENSITY_RECOMMENDED_G_L,
+    PO2_LIMIT_BAR,
+    PO2_WORKING_BAR,
     REDESCENT_M,
     SHALLOW_ZONE_M,
     STOP_EXPECTED_BELOW_M,
@@ -33,7 +37,6 @@ from src.observability import get_tracer
 from src.rag.search import Retrieval
 from src.tools import dan
 from src.tools.dive import (
-    FAST_DESCENT_M_MIN,
     LONG_WARM_MIN,
     PROLONGED_COLD_MIN,
     RESERVE_BAR,
@@ -46,6 +49,7 @@ from src.tools.dive import (
     deco_flags,
     dive_label,
     fmt,
+    gas_flags,
     habit_lines,
     measured,
     profile_flags,
@@ -212,6 +216,15 @@ def _dive_line(row) -> str:
         parts.append(f"NDL {row['min_ndl']:.0f}min")
     if measured(row.get("sac_rate")):
         parts.append(f"SAC {row['sac_rate']:.1f}L/min")
+    gas = gas_flags(row)
+    if gas["po2_over_working"]:
+        limit = PO2_LIMIT_BAR if gas["po2_over_limit"] else PO2_WORKING_BAR
+        parts.append(
+            f"PPO2 {row['max_po2']:.2f}bar on {row['min_o2']:.0f}% oxygen "
+            f"(over the {limit:.1f}bar limit)"
+        )
+    if gas["density_over_recommended"]:
+        parts.append(f"gas density {row['gas_density']:.1f}g/L at depth")
     profile = profile_flags(row)
     if profile["low_reserve"]:
         parts.append(f"LOW RESERVE {row['end_pressure']:.0f}bar at the end")
@@ -223,8 +236,6 @@ def _dive_line(row) -> str:
         parts.append(f"SURFACED MID-DIVE {int(row['mid_dive_surfacings'])}x")
     if profile["sawtooth"]:
         parts.append(f"SAWTOOTH {int(row['redescents'])} re-descents")
-    if profile["fast_descent"]:
-        parts.append(f"FAST DESCENT {row['max_descent_speed']:.1f}m/min")
     if measured(row.get("avg_temp")):
         temp_str = f"temp {row['avg_temp']:.1f}°C"
         grad = row.get("temp_gradient")
@@ -356,8 +367,9 @@ class DiverRoastAgent:
             f"{int(thermal['long_warm'].sum())} long warm-water dives"
         )
         habits = (
-            "Habits, most common first (dives showing it / dives where it could "
-            "be measured): " + "; ".join(habit_lines(features_df))
+            "What the log shows, most common first in each class (dives showing "
+            "it / dives where it could be measured):\n  "
+            + "\n  ".join(habit_lines(features_df))
         )
 
         # Cap at 200 dives in context to avoid token bloat
@@ -405,10 +417,18 @@ class DiverRoastAgent:
             f"surfacing from a dive deeper than {STOP_EXPECTED_BELOW_M:.0f} m. "
             f"SURFACED MID-DIVE is coming up to the surface and going back down. "
             f"SAWTOOTH counts re-descents of {REDESCENT_M:.0f} m or more after an "
-            f"ascent. FAST DESCENT is over {FAST_DESCENT_M_MIN:.0f} m/min sustained "
-            f"for 30 s. 'thermocline' is how much colder the bottom was than the "
-            f"shallows. The habits line ranks what the log repeats: start there, "
-            f"not with whichever number comes first on a dive's line.\n\n"
+            f"ascent. PPO2 is the oxygen partial pressure at the deepest point "
+            f"for the gas breathed: {PO2_WORKING_BAR:.1f} bar is the working limit, "
+            f"{PO2_LIMIT_BAR:.1f} bar the contingency limit. Gas density at depth "
+            f"is shown above the recommended {GAS_DENSITY_RECOMMENDED_G_L:.1f} g/L "
+            f"({GAS_DENSITY_MAX_G_L:.1f} g/L is the researched maximum). "
+            f"'thermocline' is how much colder the bottom was than the "
+            f"shallows. Findings come in three classes. Limits broken hold for "
+            f"any diver. Thin margins (low NDL, deco with the stops kept, LOW "
+            f"RESERVE, SHORT STOP, SAWTOOTH, SURFACED MID-DIVE) are the diver's "
+            f"call, as is a dense gas at depth: no limit was broken. Facts (depth on its own, SAC, descent "
+            f"rate, temperature) are neither good nor bad. Start from that "
+            f"summary, not with whichever number comes first on a dive's line.\n\n"
             f"{coverage_line(features_df)}\n\n"
             f"{agg}\n\n{habits}\n\nPer-dive summaries:\n{dive_summary}]"
         )

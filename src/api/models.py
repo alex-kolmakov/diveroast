@@ -72,6 +72,10 @@ class DiveFeature(BaseModel):
     mid_dive_surfacings: int = 0
     safety_stop_minutes: float | None = None
     end_pressure: float | None = None  # last tank reading underwater
+    # Gas at the deepest point; None when the log doesn't name the gas
+    min_o2: float | None = None  # leanest gas breathed, % oxygen
+    max_po2: float | None = None  # bar
+    gas_density: float | None = None  # g/L
     # Thermal exposure; None when the computer logged no in-water temperature
     dive_minutes: float | None = None
     water_min_temp: float | None = None
@@ -101,6 +105,9 @@ class MetricRange(BaseModel):
 
     label: str
     unit: str
+    # "limit": past the second mark is over a limit. "margin": how close to a
+    # limit, never over one. "descriptive": no good or bad, the marks are bands.
+    kind: str = "limit"  # default keeps older snapshots loadable
     recorded: int = 0  # dives with a value (0 in pre-P1 snapshots)
     total: int = 0  # dives in the log (0 in pre-P1 snapshots)
     min_val: float | None
@@ -120,6 +127,7 @@ class ProblematicDive(BaseModel):
     issues: list[str]
     summary: str
     pick_reason: str
+    pick_class: str = "limit"  # "limit" broken or a thin "margin"
 
 
 class AggregateStats(BaseModel):
