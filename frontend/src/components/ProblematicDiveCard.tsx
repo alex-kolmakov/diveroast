@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { MapPin, Globe } from "lucide-react";
-import { METRICS, NOT_RECORDED, fmtValue, type MetricKind } from "@/lib/metrics";
+import { METRICS, NOT_RECORDED, fastestAscent, fmtValue, type MetricKind } from "@/lib/metrics";
 import type { ProblematicDive } from "@/types";
 
 interface Props {
@@ -20,14 +20,14 @@ const PICKED_FOR: Record<string, { kind: MetricKind; issue: string }> = {
   "Shortest safety stop": { kind: "stop", issue: "short safety stop" },
   "Surfaced mid-dive and went back down": { kind: "surfacings", issue: "surfaced mid-dive" },
   "Most re-descents": { kind: "redescents", issue: "sawtooth profile" },
-  "Fastest ascent rate": { kind: "sustained", issue: "rapid ascent" },
-  "Fastest bolt to the surface": { kind: "surfacing", issue: "bolted to surface" },
+  "Fastest ascent rate": { kind: "ascent", issue: "rapid ascent" },
+  "Fastest bolt to the surface": { kind: "ascent", issue: "bolted to surface" },
   "Closest to decompression limit": { kind: "ndl", issue: "low NDL" },
   "Highest air consumption": { kind: "sac", issue: "high air consumption" },
   "Deepest dive with issues": { kind: "depth", issue: "deep dive" },
 };
 
-const STAT_ORDER: MetricKind[] = ["depth", "sustained", "surfacing", "ndl", "sac"];
+const STAT_ORDER: MetricKind[] = ["depth", "ascent", "ndl", "sac"];
 
 export function ProblematicDiveCard({ dive, rank }: Props) {
   const f = dive.features;
@@ -41,8 +41,7 @@ export function ProblematicDiveCard({ dive, rank }: Props) {
 
   const stats: Record<string, string> = {
     depth: fmtValue(f.max_depth, 1, "m"),
-    sustained: fmtValue(f.max_ascend_speed, 1, "m/min"),
-    surfacing: fmtValue(f.max_shallow_ascend_speed, 1, "m/min"),
+    ascent: fmtValue(fastestAscent(f), 1, "m/min"),
     ndl: f.entered_deco ? "entered deco" : fmtValue(f.min_ndl, 0, "min"),
     sac: fmtValue(f.sac_rate, 1, "L/min"),
     reserve: fmtValue(f.end_pressure, 0, "bar"),

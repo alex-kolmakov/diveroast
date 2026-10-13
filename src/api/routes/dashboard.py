@@ -11,6 +11,7 @@ from src.agent.conversation import DiverRoastAgent
 from src.agent.gemini_client import generate, get_client, thinking_config
 from src.agent.usage import daily_budget, record_usage
 from src.analysis.feature_engineering import (
+    ASCENT_LIMIT_M_MIN,
     PO2_LIMIT_BAR,
     PO2_WORKING_BAR,
     SHALLOW_ZONE_M,
@@ -36,18 +37,23 @@ from src.storage.snapshots import SnapshotStore
 from src.tools.dive import (
     LIMIT,
     MARGIN,
+    REDESCENT_MANY_M,
     RESERVE_BAR,
+    RESERVE_THIN_BAR,
     SAFETY_STOP_MIN,
     deco_flags,
     dive_findings,
     dive_issues,
     dive_label,
+    fastest_ascent,
+    fastest_ascents,
     fmt,
     measured,
     thermal_flags,
 )
 
 DESCRIPTIVE = "descriptive"
+FASTEST_ASCENT = "fastest_ascent"  # derived per dive, see fastest_ascent()
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -55,6 +61,7 @@ logger = logging.getLogger(__name__)
 # Gauges: (label, unit, first mark, second mark, class), in panel order.
 #   descriptive - no good or bad: the marks only split the dives into bands
 #   limit       - the marks are limits any diver is held to: past the second is red
+#                 Marks running high to low mean lower is worse.
 # NDL has no gauge: running it down, even to zero, breaks nothing by itself.
 # What can go wrong with deco is a required stop not kept, and that is shown
 # from the dives' own deco fields.
@@ -63,7 +70,7 @@ THRESHOLDS = {
     "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0, DESCRIPTIVE),
     "avg_temp": ("Avg Temperature", "\u00b0C", None, None, DESCRIPTIVE),
     # Total metres gone back down after coming up: 0 is a clean profile.
-    "redescent_metres": ("Re-descents", "m", 0.0, 10.0, DESCRIPTIVE),
+    "redescent_metres": ("Re-descents", "m", 0.0, REDESCENT_MANY_M, DESCRIPTIVE),
     "max_po2": (
         "Oxygen Pressure at Depth",
         "bar",
@@ -71,14 +78,14 @@ THRESHOLDS = {
         PO2_LIMIT_BAR,
         LIMIT,
     ),
-    "max_ascend_speed": ("Max Sustained Ascent (30 s)", "m/min", 9.0, 10.0, LIMIT),
-    "max_shallow_ascend_speed": (
-        "Fastest Surfacing (last 5 m)",
-        "m/min",
-        9.0,
-        10.0,
-        LIMIT,
-    ),
+    # The last tank reading underwater: amber under the usual reserve, red
+    # when next to nothing was left. A technical dive carries gas the log may
+    # not show, so its reading isn't on the gauge.
+    "end_pressure": ("Gas Left on Exit", "bar", RESERVE_BAR, RESERVE_THIN_BAR, LIMIT),
+    # One ascent gauge: the faster of the 30 s sustained rate and the final
+    # ascent from the safety stop. Both are held to the same limit, and two
+    # gauges read as two different rules.
+    FASTEST_ASCENT: ("Fastest Ascent", "m/min", 9.0, ASCENT_LIMIT_M_MIN, LIMIT),
 }
 DESCRIPTIVE_ZONE = "safe"  # a descriptive gauge is never amber or red overall
 
@@ -153,6 +160,10 @@ WATER_TYPE_KEYWORDS = {
 
 
 def _classify_zone(value: float, safe_upper: float, warning_upper: float) -> str:
+    if warning_upper < safe_upper:  # lower is worse: the marks run high to low
+        if value >= safe_upper:
+            return "safe"
+        return "warning" if value >= warning_upper else "danger"
     if value <= safe_upper:
         return "safe"
     if value <= warning_upper:
@@ -185,6 +196,11 @@ def _build_metrics(features_df) -> list[MetricRange]:
     """Gauge data per metric, over only the dives that recorded it."""
     metrics = []
     total = len(features_df)
+    features_df = features_df.assign(**{FASTEST_ASCENT: fastest_ascents(features_df)})
+    if {"end_pressure", "technical"} <= set(features_df.columns):
+        features_df["end_pressure"] = features_df["end_pressure"].where(
+            ~features_df["technical"].astype(bool)
+        )
     for col, (label, unit, safe_up, warn_up, kind) in THRESHOLDS.items():
         if col not in features_df.columns:
             continue
@@ -208,7 +224,11 @@ def _build_metrics(features_df) -> list[MetricRange]:
                     zone=pt_zone,
                 )
             )
-        per_dive.sort(key=lambda p: p.value)
+        # Best on the left, worst on the right, whichever way the metric runs.
+        lower_is_worse = (
+            safe_up is not None and warn_up is not None and warn_up < safe_up
+        )
+        per_dive.sort(key=lambda p: p.value, reverse=lower_is_worse)
 
         common = {
             "kind": kind,
@@ -235,14 +255,16 @@ def _build_metrics(features_df) -> list[MetricRange]:
             )
         else:
             assert safe_up is not None and warn_up is not None
+            # Higher is worse for depth, ascent and SAC; lower for gas left.
+            worst_val = min_val if warn_up < safe_up else max_val
             metrics.append(
                 MetricRange(
                     **common,
-                    worst_val=max_val,  # higher is worse for depth, ascent, SAC
+                    worst_val=worst_val,
                     safe_upper=safe_up,
                     warning_upper=warn_up,
-                    zone=_classify_zone(max_val, safe_up, warn_up)
-                    if max_val is not None and kind != DESCRIPTIVE
+                    zone=_classify_zone(worst_val, safe_up, warn_up)
+                    if worst_val is not None and kind != DESCRIPTIVE
                     else DESCRIPTIVE_ZONE,
                 )
             )
@@ -332,12 +354,51 @@ def _deco_summary(stats) -> str:
     return f"entered_deco=yes, {kind}, {kept}"
 
 
+# The stat a card shows for the finding it was picked for, where the stats
+# every card carries (depth, ascent, deco, NDL, SAC) don't already have it:
+# (name, feature, format, unit and what it is measured against).
+PICKED_STATS = {
+    "oxygen pressure": (
+        "oxygen_pressure_at_depth",
+        "max_po2",
+        ".2f",
+        f" bar (working limit {PO2_WORKING_BAR:.1f} bar, "
+        f"contingency {PO2_LIMIT_BAR:.1f} bar)",
+    ),
+    "gas density": ("gas_density_at_depth", "gas_density", ".1f", " g/L"),
+    "low gas reserve": (
+        "last_tank_reading",
+        "end_pressure",
+        ".0f",
+        f" bar (usual reserve {RESERVE_BAR:.0f} bar)",
+    ),
+    "short safety stop": (
+        "safety_stop",
+        "safety_stop_minutes",
+        ".1f",
+        f" min (usual {SAFETY_STOP_MIN:.0f} min)",
+    ),
+    "sawtooth profile": ("re-descents", "redescents", ".0f", ""),
+    "surfaced mid-dive": ("mid-dive surfacings", "mid_dive_surfacings", ".0f", ""),
+}
+
+
+def _picked_stat(dive: dict) -> str:
+    """The picked finding's own number, so a jab quotes only what its card shows."""
+    stat = PICKED_STATS.get(dive.get("pick_issue", ""))
+    if stat is None:
+        return ""
+    name, feature, spec, unit = stat
+    return f", {name}={fmt(dive['stats'].get(feature), spec, unit)}"
+
+
 def _generate_dive_summaries(
     dives: list[dict],
 ) -> list[str]:
     """Ask Gemini to write a short paragraph for each problematic dive.
 
-    Each dict in *dives* has keys: dive_number, site, pick_reason, issues, stats.
+    Each dict in *dives* has keys: dive_number, site, pick_reason, pick_issue,
+    issues, stats.
     Returns one summary string per dive (same order).
     Falls back to a simple template if the LLM call fails.
     """
@@ -368,25 +429,13 @@ def _generate_dive_summaries(
             f"({'a limit broken' if d.get('pick_class') == LIMIT else 'a thin margin, no limit broken'})\n"
             f"  Issues: {', '.join(d['issues'])}\n"
             f"  Stats: max_depth={d['stats']['max_depth']:.1f}m, "
-            f"max_ascent={fmt(d['stats'].get('max_ascend_speed'), unit=' m/min')} "
-            f"(30 s average), "
-            f"fastest_surfacing="
-            f"{fmt(d['stats'].get('max_shallow_ascend_speed'), unit=' m/min')} "
-            f"(from the safety stop, the last {SHALLOW_ZONE_M:.0f} m), "
+            f"fastest_ascent={fmt(fastest_ascent(d['stats']), unit=' m/min')} "
+            f"(30 s sustained or the last {SHALLOW_ZONE_M:.0f} m to the surface, "
+            f"limit {ASCENT_LIMIT_M_MIN:.0f} m/min), "
             f"{_deco_summary(d['stats'])}, "
             f"min_ndl={fmt(d['stats'].get('min_ndl'), '.0f', ' min')}, "
-            f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}, "
-            f"oxygen_pressure_at_depth={fmt(d['stats'].get('max_po2'), '.2f', ' bar')} "
-            f"(working limit {PO2_WORKING_BAR:.1f} bar, contingency {PO2_LIMIT_BAR:.1f} bar), "
-            f"gas_density_at_depth={fmt(d['stats'].get('gas_density'), unit=' g/L')}, "
-            f"last_tank_reading={fmt(d['stats'].get('end_pressure'), '.0f', ' bar')} "
-            f"(usual reserve {RESERVE_BAR:.0f} bar), "
-            f"safety_stop={fmt(d['stats'].get('safety_stop_minutes'), unit=' min')} "
-            f"(usual {SAFETY_STOP_MIN:.0f} min), "
-            f"re-descents={fmt(d['stats'].get('redescents'), '.0f')}, "
-            f"mid-dive surfacings={fmt(d['stats'].get('mid_dive_surfacings'), '.0f')}, "
-            f"avg_temp={fmt(d['stats'].get('avg_temp'), unit='°C')}, "
-            f"thermocline={fmt(d['stats'].get('temp_gradient'), unit='°C')}"
+            f"sac_rate={fmt(d['stats'].get('sac_rate'), unit=' L/min')}"
+            f"{_picked_stat(d)}"
         )
 
     try:
@@ -718,6 +767,7 @@ def _build_dashboard(
                 "dive_number": dn,
                 "site": site if site and site != "N/A" else "unknown site",
                 "pick_reason": PICK_REASONS.get(pi, "Most dangerous overall"),
+                "pick_issue": pi,
                 "pick_class": _pick_class(rd, pi),
                 "issues": iss,
                 "stats": rd,

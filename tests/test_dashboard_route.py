@@ -55,6 +55,29 @@ class TestClassifyZone:
         assert _classify_zone(30.0, 18.0, 30.0) == "warning"
 
 
+def test_gas_left_gauge_runs_from_plenty_to_empty():
+    import pandas as pd
+
+    from src.api.routes.dashboard import _build_metrics
+
+    features = pd.DataFrame(
+        {
+            "dive_number": ["1", "2", "3", "4"],
+            "end_pressure": [80.0, 40.0, 20.0, 10.0],
+            "technical": [False, False, False, True],
+        }
+    )
+    gauge = next(m for m in _build_metrics(features) if m.label == "Gas Left on Exit")
+    # The technical dive carries gas the log may not show: it isn't judged.
+    # Left to right like every other gauge: fine, under the reserve, red.
+    assert [(p.dive_number, p.zone) for p in gauge.per_dive] == [
+        ("1", "safe"),
+        ("2", "warning"),
+        ("3", "danger"),
+    ]
+    assert gauge.worst_val == 20.0 and gauge.zone == "danger"
+
+
 class TestComputeDangerScore:
     def test_safe_dive(self):
         row = {
@@ -329,7 +352,10 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
     assert kinds["SAC Rate"] == "descriptive"
     # NDL is a margin, not a limit: it has no gauge
     assert "Min NDL" not in kinds
+    # Ascent is one gauge: the faster of the sustained rate and the surfacing
     assert list(kinds.values()) == ["descriptive"] * 4 + ["limit"] * 3
+    assert "Gas Left on Exit" in kinds
+    assert kinds["Fastest Ascent"] == "limit"
     assert kinds["Re-descents"] == "descriptive"
     assert kinds["Oxygen Pressure at Depth"] == "limit"
     depth = next(m for m in data["metrics"] if m["label"] == "Max Depth")

@@ -269,7 +269,8 @@ function stopState(d: DiveFeature): StopState | null {
   if ((d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0) return "missed";
   if (d.entered_deco) return d.missed_stop_minutes == null ? "unknown" : "kept";
   if (d.safety_stop_minutes == null) return null;
-  return d.safety_stop_minutes < SAFETY_STOP_MIN ? "short" : "kept";
+  // Short only if it reads short at the one decimal shown: 2.95 min is a 3.0 min stop.
+  return Math.round(d.safety_stop_minutes * 10) / 10 < SAFETY_STOP_MIN ? "short" : "kept";
 }
 
 /** Safety and deco stops, one segment per dive deep enough to expect one. */
@@ -374,18 +375,19 @@ export function RangeGauge({ metric }: Props) {
   // NDL is inverted: lower is worse, so its thresholds run high to low.
   const inverted = metric.warning_upper < metric.safe_upper;
   const hasThresholds = metric.safe_upper > 0 && metric.warning_upper > 0;
-  const overLimit = dives.filter((d) => d.zone === "danger").length;
+  // A limit counts the dives past it; a margin counts the dives short of the usual mark.
+  const overLimit = dives.filter((d) => (margin ? d.zone !== "safe" : d.zone === "danger")).length;
   const kind = metricKind(metric.label);
-  const places = digits(metric.unit);
+  const places = kind === "reserve" ? 0 : digits(metric.unit);
   const meta = `avg ${fmt(metric.avg_val, places)} · range ${fmt(metric.min_val, places)}–${fmt(metric.max_val, places)}`;
   // What the number means and where the limits sit, under the bar.
   const legend = [
     kind && METRICS[kind].qualifier,
     hasThresholds &&
       (margin
-        ? `comfortable ≥ ${metric.safe_upper} · thin < ${metric.warning_upper} ${metric.unit} · a margin, not a limit`
+        ? `usual ≥ ${metric.safe_upper} · thin < ${metric.warning_upper} ${metric.unit} · a margin, not a limit`
         : inverted
-          ? `safe ≥ ${metric.safe_upper} · danger < ${metric.warning_upper} ${metric.unit}`
+          ? `usual ≥ ${metric.safe_upper} · red < ${metric.warning_upper} ${metric.unit}`
           : `safe ≤ ${metric.safe_upper} · limit ${metric.warning_upper} ${metric.unit}`),
     coverage(metric),
   ]
@@ -406,7 +408,10 @@ export function RangeGauge({ metric }: Props) {
         <span>{meta}</span>
         {overLimit > 0 && (
           <span className={`shrink-0 font-semibold ${margin ? "text-warning" : "text-danger"}`}>
-            {overLimit} {inverted ? `under ${metric.warning_upper} ${metric.unit}` : "over limit"}
+            {overLimit}{" "}
+            {inverted
+              ? `under ${margin ? metric.safe_upper : metric.warning_upper} ${metric.unit}`
+              : "over limit"}
           </span>
         )}
       </div>
@@ -444,7 +449,8 @@ export function RangeGauge({ metric }: Props) {
 function _thresholdPercent(threshold: number, metric: MetricRange): number {
   const dives = metric.per_dive;
   if (dives.length === 0) return 0;
-  // Find how many dives are below the threshold
-  const below = dives.filter((d) => d.value <= threshold).length;
+  // How many dives sit left of the threshold; a lower-is-worse gauge runs high to low
+  const descending = dives[0].value > dives[dives.length - 1].value;
+  const below = dives.filter((d) => (descending ? d.value >= threshold : d.value <= threshold)).length;
   return (below / dives.length) * 100;
 }

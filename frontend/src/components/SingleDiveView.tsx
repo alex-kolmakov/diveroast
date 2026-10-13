@@ -10,7 +10,16 @@ import {
 } from "recharts";
 import { AlertTriangle, ArrowUp, ArrowUpToLine } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { METRICS, NOT_RECORDED, ZONE_TEXT, fmtValue, metricKind, type MetricKind, type Zone } from "@/lib/metrics";
+import {
+  METRICS,
+  NOT_RECORDED,
+  ZONE_TEXT,
+  fastestAscent,
+  fmtValue,
+  metricKind,
+  type MetricKind,
+  type Zone,
+} from "@/lib/metrics";
 import type { AscentEvent, DiveFeature, MetricRange, SingleDive } from "@/types";
 
 interface Props {
@@ -156,20 +165,14 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
   return (
     <div className="space-y-6">
       <Card>
-        <CardContent className="grid grid-cols-2 gap-x-4 gap-y-5 pt-5 sm:grid-cols-4 lg:grid-cols-7">
+        <CardContent className="grid grid-cols-2 gap-x-4 gap-y-5 pt-5 sm:grid-cols-3 lg:grid-cols-6">
           <Stat label={METRICS.depth.name} value={fmtValue(features.max_depth, 1, "m")} zone={zone("depth")} />
           <Stat label="Duration" value={`${dive.duration_min.toFixed(0)} min`} />
           <Stat
-            label={METRICS.sustained.name}
-            qualifier={METRICS.sustained.qualifier}
-            value={fmtValue(features.max_ascend_speed, 1, "m/min")}
-            zone={zone("sustained")}
-          />
-          <Stat
-            label={METRICS.surfacing.name}
-            qualifier={METRICS.surfacing.qualifier}
-            value={fmtValue(features.max_shallow_ascend_speed, 1, "m/min")}
-            zone={zone("surfacing")}
+            label={METRICS.ascent.name}
+            qualifier={METRICS.ascent.qualifier}
+            value={fmtValue(fastestAscent(features), 1, "m/min")}
+            zone={zone("ascent")}
           />
           <Stat
             label={METRICS.ndl.name}
@@ -248,7 +251,7 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
             <p className="mt-4 text-sm text-muted-foreground">
               {features.max_ascend_speed == null && features.max_shallow_ascend_speed == null
                 ? "Nothing flagged. Ascent rates can't be measured on a dive this shallow."
-                : "Nothing flagged: sustained ascent and every surfacing stayed at or under 10 m/min, and no other limit was crossed."}
+                : "Nothing flagged: every ascent stayed at or under 10 m/min, and no other limit was crossed."}
             </p>
           )}
         </CardContent>
