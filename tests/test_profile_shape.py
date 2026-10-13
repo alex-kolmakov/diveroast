@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.feature_engineering import count_redescents, extract_features
+from src.analysis.feature_engineering import (
+    count_redescents,
+    extract_features,
+    redescents,
+)
 from src.tools.dive import (
     anomaly_queries,
     dive_issues,
@@ -57,11 +61,25 @@ def test_redescents_count_sawtooth_teeth_not_reef_wobbles():
     assert count_redescents(np.array([0, 20, 17, 20, 17, 20, 0.0])) == 0
 
 
+def test_redescent_metres_weigh_big_swings_more_than_small_ones():
+    assert redescents(np.array([0, 10, 20, 20, 12, 5, 0.0])) == (0, 0.0)
+    assert redescents(np.array([0, 20, 12, 20, 12, 20, 5, 0.0])) == (2, 16.0)
+    assert redescents(np.array([0, 30, 10, 30, 0.0])) == (1, 20.0)
+    # The trace ends while still going back down: the leg still counts.
+    assert redescents(np.array([0, 20, 10, 18.0])) == (1, 8.0)
+
+
+def test_redescent_metres_not_counted_on_a_shallow_drill_dive():
+    row = _row([0, 6, 0, 6, 0, 6, 6, 3, 0])
+    assert np.isnan(row["redescent_metres"])
+
+
 def test_clean_square_profile_has_nothing_to_flag():
     row = _row(_square())
     assert row["safety_stop_minutes"] >= 3
     assert row["max_shallow_ascend_speed"] <= 10
     assert row["redescents"] == 0
+    assert row["redescent_metres"] == 0
     assert row["mid_dive_surfacings"] == 0
     assert row["max_descent_speed"] == pytest.approx(12.0)
 

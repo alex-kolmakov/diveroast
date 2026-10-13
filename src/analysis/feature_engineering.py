@@ -263,14 +263,18 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=ASCENT_COLUMNS)
 
 
-def count_redescents(depths: np.ndarray) -> int:
-    """Re-descents of ``REDESCENT_M`` or more after an ascent of the same size.
+def redescents(depths: np.ndarray) -> tuple[int, float]:
+    """(count, total metres) of re-descents after an ascent of ``REDESCENT_M``.
 
-    A plain down-then-up profile counts 0; every sawtooth tooth adds 1.
+    A re-descent is going back down by ``REDESCENT_M`` or more after coming up
+    by as much. A plain down-then-up profile gives (0, 0.0); every sawtooth
+    tooth adds 1 and the metres it went back down, so one 20 m bounce weighs
+    more than one 5 m bounce.
     """
-    count = 0
+    count, metres = 0, 0.0
     direction = 0  # 1 = descending, -1 = ascending
     pivot = depths[0] if len(depths) else 0.0
+    leg_start: float | None = None  # shallowest point before the current re-descent
     for depth in depths:
         if direction == 0:
             if depth >= pivot + REDESCENT_M:
@@ -281,13 +285,24 @@ def count_redescents(depths: np.ndarray) -> int:
             if depth > pivot:
                 pivot = depth
             elif depth <= pivot - REDESCENT_M:
+                if leg_start is not None:
+                    metres += pivot - leg_start
+                    leg_start = None
                 direction, pivot = -1, depth
         elif depth < pivot:
             pivot = depth
         elif depth >= pivot + REDESCENT_M:
+            leg_start = pivot
             direction, pivot = 1, depth
             count += 1
-    return count
+    if leg_start is not None:  # the trace ended while still going back down
+        metres += pivot - leg_start
+    return count, float(metres)
+
+
+def count_redescents(depths: np.ndarray) -> int:
+    """Number of re-descents (see ``redescents``)."""
+    return redescents(depths)[0]
 
 
 def _mid_dive_surfacings(depths: np.ndarray) -> int:
@@ -350,13 +365,19 @@ def _profile(dive: pd.DataFrame) -> dict[str, float]:
     depths = dive["depth"].to_numpy(dtype=float)
     rates, _ = _window_rates(times, depths, ASCENT_WINDOW_S)
     descents = -rates[~np.isnan(rates)]
+    count, metres = redescents(depths)
     # The last reading taken underwater: the pod keeps logging on the boat.
     pressure = dive["pressure"][dive["depth"] >= SURFACE_M].dropna()
     return {
         "max_descent_speed": float(max(descents.max(), 0.0))
         if len(descents)
         else float("nan"),
-        "redescents": count_redescents(depths),
+        "redescents": count,
+        # Only on dives deep enough for it to mean something: on a shallow
+        # training dive, going up and down is the drill.
+        "redescent_metres": metres
+        if depths.max() > STOP_EXPECTED_BELOW_M
+        else float("nan"),
         "mid_dive_surfacings": _mid_dive_surfacings(depths),
         "safety_stop_minutes": _safety_stop_minutes(times, depths),
         "end_pressure": float(pressure.iloc[-1]) if len(pressure) else float("nan"),

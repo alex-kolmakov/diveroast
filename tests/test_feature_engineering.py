@@ -146,6 +146,7 @@ def test_extract_features():
         "shallow_bolt_count",
         "max_descent_speed",
         "redescents",
+        "redescent_metres",
         "mid_dive_surfacings",
         "safety_stop_minutes",
         "end_pressure",

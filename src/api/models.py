@@ -69,6 +69,7 @@ class DiveFeature(BaseModel):
     # not recorded (no tank pod, too shallow to expect a safety stop)
     max_descent_speed: float | None = None
     redescents: int = 0
+    redescent_metres: float | None = None  # None: too shallow to count
     mid_dive_surfacings: int = 0
     safety_stop_minutes: float | None = None
     end_pressure: float | None = None  # last tank reading underwater

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { METRICS, NOT_RECORDED, ZONE_TEXT, metricKind, type Zone } from "@/lib/metrics";
-import type { DiveMetricPoint, MetricRange } from "@/types";
+import type { DiveFeature, DiveMetricPoint, MetricRange } from "@/types";
 
 interface Props {
   metric: MetricRange;
@@ -133,13 +133,13 @@ export function TemperatureGauge({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
         <span className="text-sm font-medium">{METRICS.temp.name}</span>
         <span className="text-sm font-semibold text-muted-foreground">
           {fmt(metric.min_val)}° – {fmt(metric.max_val)}°
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
         <span>{meta}</span>
         {nickname && (
           <span className="font-semibold" style={{ color: nickname.color }}>
@@ -192,25 +192,26 @@ function DescriptiveGauge({ metric }: Props) {
   const count = (zone: DiveMetricPoint["zone"]) => dives.filter((d) => d.zone === zone).length;
   const { safe_upper: low, warning_upper: high, unit } = metric;
   const bands = [
-    { zone: "safe" as const, label: `up to ${low} ${unit}` },
-    { zone: "warning" as const, label: `${low}–${high} ${unit}` },
+    { zone: "safe" as const, label: low === 0 ? "none" : `up to ${low} ${unit}` },
+    { zone: "warning" as const, label: low === 0 ? `up to ${high} ${unit}` : `${low}–${high} ${unit}` },
     { zone: "danger" as const, label: `over ${high} ${unit}` },
   ].filter((band) => count(band.zone) > 0);
+  const kind = metricKind(metric.label);
+  const qualifier = kind ? METRICS[kind].qualifier : "";
   const meta = [`avg ${fmt(metric.avg_val)} · range ${fmt(metric.min_val)}–${fmt(metric.max_val)}`, coverage(metric)]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
         <span className="text-sm font-medium">{displayName(metric)}</span>
         <span className="shrink-0 text-sm font-semibold text-muted-foreground">
           {metric.max_val != null ? `up to ${metric.max_val.toFixed(1)} ${unit}` : "–"}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
         <span>{meta}</span>
-        <span className="shrink-0">no limit here</span>
       </div>
 
       <DiveBar
@@ -236,9 +237,69 @@ function DescriptiveGauge({ metric }: Props) {
           ))
         )}
       </div>
+      {qualifier && <div className="text-xs text-muted-foreground">{qualifier}</div>}
     </div>
   );
 }
+
+/**
+ * Deco as a limit: going into deco breaks nothing, not keeping a required
+ * stop does. One segment per recreational dive that went into deco.
+ * Technical dives plan their deco and only show up if they missed a stop.
+ */
+export function DecoStopsGauge({ dives }: { dives: DiveFeature[] }) {
+  const missedStop = (d: DiveFeature) =>
+    (d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0;
+  const deco = dives.filter((d) => missedStop(d) || (d.entered_deco && !d.technical));
+  const missed = deco.filter(missedStop).length;
+  const unknown = deco.filter((d) => !missedStop(d) && d.missed_stop_minutes == null).length;
+  const name = METRICS.decoStops.name;
+  const dive = (n: number) => `${n} ${n === 1 ? "dive" : "dives"}`;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
+        <span className="text-sm font-medium">{name}</span>
+        <span className={`shrink-0 text-sm font-semibold ${missed > 0 ? "text-danger" : "text-safe"}`}>
+          {missed > 0 ? `${missed} not kept` : deco.length > 0 ? "all kept" : "–"}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
+        <span>{deco.length > 0 ? `${dive(deco.length)} went into deco` : "no dive went into deco"}</span>
+        {missed > 0 && <span className="shrink-0 font-semibold text-danger">{missed} over limit</span>}
+      </div>
+
+      {deco.length > 0 ? (
+        <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
+          {deco.map((d, i) => (
+            <div
+              key={d.dive_number}
+              title={`Dive #${d.dive_number}`}
+              className={`absolute inset-y-0 opacity-80 ${
+                missedStop(d) ? "bg-danger" : d.missed_stop_minutes == null ? "bg-muted" : "bg-safe"
+              }`}
+              style={{
+                left: `${(i * 100) / deco.length}%`,
+                width: `${100 / deco.length}%`,
+                borderRight: i < deco.length - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="h-5 w-full rounded-full border border-dashed border-muted" />
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        {METRICS.decoStops.qualifier} · going into deco breaks no limit, skipping a required stop does
+        {unknown > 0 && ` · stops not recorded for ${unknown}`}
+      </div>
+    </div>
+  );
+}
+
+// Underwater time above a required stop shorter than this is waves or sensor noise.
+const MISSED_STOP_MIN = 0.5;
 
 export function RangeGauge({ metric }: Props) {
   const [hoveredDive, setHoveredDive] = useState<DiveMetricPoint | null>(null);
@@ -273,7 +334,7 @@ export function RangeGauge({ metric }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2">
         <span className="text-sm font-medium">{name}</span>
         <span className={`shrink-0 text-sm font-semibold ${ZONE_TEXT[shown(metric.zone)]}`}>
           {metric.worst_val != null
@@ -281,7 +342,7 @@ export function RangeGauge({ metric }: Props) {
             : "–"}
         </span>
       </div>
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
         <span>{meta}</span>
         {overLimit > 0 && (
           <span className={`shrink-0 font-semibold ${margin ? "text-warning" : "text-danger"}`}>

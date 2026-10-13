@@ -62,6 +62,8 @@ THRESHOLDS = {
     "max_depth": ("Max Depth", "m", 18.0, 30.0, DESCRIPTIVE),
     "sac_rate": ("SAC Rate", "L/min", 15.0, 20.0, DESCRIPTIVE),
     "avg_temp": ("Avg Temperature", "\u00b0C", None, None, DESCRIPTIVE),
+    # Total metres gone back down after coming up: 0 is a clean profile.
+    "redescent_metres": ("Re-descents", "m", 0.0, 10.0, DESCRIPTIVE),
     "max_po2": (
         "Oxygen Pressure at Depth",
         "bar",
@@ -633,6 +635,7 @@ def _build_dashboard(
                 shallow_bolt_count=int(row["shallow_bolt_count"]),
                 max_descent_speed=_r(row["max_descent_speed"]),
                 redescents=int(row["redescents"]),
+                redescent_metres=_r(row["redescent_metres"], 1),
                 mid_dive_surfacings=int(row["mid_dive_surfacings"]),
                 safety_stop_minutes=_r(row["safety_stop_minutes"], 1),
                 end_pressure=_r(row["end_pressure"], 1),

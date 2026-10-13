@@ -13,6 +13,8 @@ export const METRICS = {
   missedStop: { name: "Above a required stop", qualifier: "" },
   po2: { name: "Oxygen pressure", qualifier: "at the deepest point, for the gas breathed" },
   density: { name: "Gas density", qualifier: "at the deepest point" },
+  backDown: { name: "Re-descents", qualifier: "metres back down after coming up, on dives deeper than 10 m" },
+  decoStops: { name: "Deco stops", qualifier: "required stops not kept" },
 } as const;
 
 export type MetricKind = keyof typeof METRICS;
@@ -30,6 +32,7 @@ export const ZONE_TEXT: Record<Zone, string> = {
 export function metricKind(label: string): MetricKind | null {
   const l = label.toLowerCase();
   if (l.includes("oxygen")) return "po2";
+  if (l.includes("re-descent")) return "backDown";
   if (l.includes("surfacing")) return "surfacing";
   if (l.includes("ascent")) return "sustained";
   if (l.includes("ndl")) return "ndl";

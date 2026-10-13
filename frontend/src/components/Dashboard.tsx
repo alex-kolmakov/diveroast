@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Award, MapPin, Waves, Anchor } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
-import { RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
+import { DecoStopsGauge, RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
 import { DonationNotice } from "@/components/DonationNotice";
@@ -16,13 +16,12 @@ const SingleDiveView = lazy(() =>
 import type {
   ChatMessage,
   DashboardData,
-  DiveFeature,
   DiverProfile,
   DonationReceipt,
   MetricRange,
 } from "@/types";
 
-const DESCRIPTIVE_KINDS = new Set(["depth", "sac", "temp"]);
+const DESCRIPTIVE_KINDS = new Set(["depth", "sac", "temp", "backDown"]);
 
 /** Older shared snapshots carry no class: fall back to which metric it is. */
 function isDescriptive(metric: MetricRange): boolean {
@@ -35,13 +34,13 @@ function MetricPanel({
   note,
   metrics,
   exposure,
-  footer,
+  extra,
 }: {
   title: string;
   note: string;
   metrics: MetricRange[];
   exposure?: Record<string, number>;
-  footer?: React.ReactNode;
+  extra?: React.ReactNode; // one more gauge, built from the dives themselves
 }) {
   if (metrics.length === 0) return null;
   return (
@@ -50,10 +49,10 @@ function MetricPanel({
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-xs text-muted-foreground">{note}</p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {metrics.map((metric) => (
           <Card key={metric.label}>
-            <CardContent className="pt-4">
+            <CardContent className="px-4 pt-4">
               {metricKind(metric.label) === "temp" ? (
                 <TemperatureGauge metric={metric} exposure={exposure} />
               ) : (
@@ -62,38 +61,13 @@ function MetricPanel({
             </CardContent>
           </Card>
         ))}
+        {extra && (
+          <Card>
+            <CardContent className="px-4 pt-4">{extra}</CardContent>
+          </Card>
+        )}
       </div>
-      {footer}
     </div>
-  );
-}
-
-// Underwater time above a required stop shorter than this is waves or sensor noise.
-const MISSED_STOP_MIN = 0.5;
-
-/**
- * Deco as a limit: going into deco breaks nothing, not keeping a required
- * stop does. Technical dives plan their deco and aren't counted as entries.
- */
-function DecoStops({ dives }: { dives: DiveFeature[] }) {
-  const missed = dives.filter(
-    (d) => (d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0
-  ).length;
-  const entered = dives.filter((d) => d.entered_deco && !d.technical).length;
-  if (missed === 0 && entered === 0) return null;
-  const dive = (n: number) => `${n} ${n === 1 ? "dive" : "dives"}`;
-  return (
-    <p className="mt-3 text-xs text-muted-foreground">
-      <span className="font-medium text-foreground">Deco stops: </span>
-      {missed > 0 ? (
-        <span className="font-semibold text-danger">{dive(missed)} missed a required stop</span>
-      ) : (
-        <span>
-          {dive(entered)} went into deco, every required stop kept. Running the NDL to zero breaks no limit;
-          skipping the stop would.
-        </span>
-      )}
-    </p>
   );
 }
 
@@ -164,7 +138,7 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
               title="Limits"
               note="Lines any diver is held to. Red is a limit broken."
               metrics={data.metrics.filter((m) => !isDescriptive(m))}
-              footer={<DecoStops dives={data.all_dives} />}
+              extra={<DecoStopsGauge dives={data.all_dives} />}
             />
 
             {worst.length > 0 && (

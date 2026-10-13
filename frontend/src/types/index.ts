@@ -57,6 +57,7 @@ export interface DiveFeature {
   // Profile shape and gas; absent in older snapshots, null when not recorded
   max_descent_speed?: number | null;
   redescents?: number;
+  redescent_metres?: number | null; // total metres back down; null: too shallow to count
   mid_dive_surfacings?: number;
   safety_stop_minutes?: number | null; // null: too shallow to expect a stop
   end_pressure?: number | null; // last tank reading underwater

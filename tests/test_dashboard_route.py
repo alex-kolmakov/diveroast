@@ -329,7 +329,8 @@ async def test_dashboard_success(mock_summaries, session_with_dives):
     assert kinds["SAC Rate"] == "descriptive"
     # NDL is a margin, not a limit: it has no gauge
     assert "Min NDL" not in kinds
-    assert list(kinds.values()) == ["descriptive"] * 3 + ["limit"] * 3
+    assert list(kinds.values()) == ["descriptive"] * 4 + ["limit"] * 3
+    assert kinds["Re-descents"] == "descriptive"
     assert kinds["Oxygen Pressure at Depth"] == "limit"
     depth = next(m for m in data["metrics"] if m["label"] == "Max Depth")
     assert depth["zone"] == "safe"
