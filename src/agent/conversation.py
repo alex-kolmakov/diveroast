@@ -22,12 +22,9 @@ from src.agent.system_prompts import PromptVersion, get_active_prompt
 from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
 from src.analysis.feature_engineering import (
-    COLD_WATER_C,
-    GAS_DENSITY_MAX_G_L,
-    GAS_DENSITY_RECOMMENDED_G_L,
+    ASCENT_LIMIT_M_MIN,
     PO2_LIMIT_BAR,
     PO2_WORKING_BAR,
-    REDESCENT_M,
     SHALLOW_ZONE_M,
     STOP_EXPECTED_BELOW_M,
     extract_features,
@@ -37,23 +34,22 @@ from src.observability import get_tracer
 from src.rag.search import Retrieval
 from src.tools import dan
 from src.tools.dive import (
-    LONG_WARM_MIN,
-    PROLONGED_COLD_MIN,
+    RECREATIONAL_MAX_M,
+    REDESCENT_MANY_M,
     RESERVE_BAR,
     SAFETY_STOP_MIN,
-    THERMOCLINE_C,
-    WARM_WATER_C,
     anomaly_queries,
     build_anomaly_keywords,
     coverage_line,
     deco_flags,
     dive_label,
+    fastest_ascent,
+    fastest_ascents,
     fmt,
     gas_flags,
     habit_lines,
     measured,
     profile_flags,
-    thermal_flags,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,6 +176,7 @@ def _dive_names(row) -> list[str]:
 
 
 def _dive_line(row) -> str:
+    """One dive as the roast sees it: only what the dashboard shows the diver."""
     site = str(row.get("dive_site_name", "N/A"))
     trip = str(row.get("trip_name", ""))
     # Not "unknown": models echo it as a place ("at unknown").
@@ -192,10 +189,9 @@ def _dive_line(row) -> str:
     ]
     if measured(row.get("dive_minutes")):
         parts.append(f"{row['dive_minutes']:.0f}min long")
-    if measured(row.get("max_ascend_speed")):
-        parts.append(f"ascent {row['max_ascend_speed']:.1f}m/min")
-    if measured(row.get("max_shallow_ascend_speed")):
-        parts.append(f"surfacing {row['max_shallow_ascend_speed']:.1f}m/min")
+    ascent = fastest_ascent(row)
+    if ascent is not None:
+        parts.append(f"ascent {ascent:.1f}m/min")
     deco = deco_flags(row)
     if deco["technical"]:
         parts.append(f"TECH ({row.get('tech_reason')})")
@@ -205,6 +201,8 @@ def _dive_line(row) -> str:
         label = "planned deco" if deco["technical"] else "ENTERED DECO"
         kept = ", stops kept" if deco["stops_kept"] else ""
         parts.append(f"{label}{length}{kept}")
+    elif measured(row.get("min_ndl")) and not deco["technical"]:
+        parts.append(f"NDL {row['min_ndl']:.0f}min")
     if deco["missed_stop"]:
         parts.append(
             f"MISSED STOP {row['missed_stop_minutes']:.1f}min, up to "
@@ -212,8 +210,13 @@ def _dive_line(row) -> str:
         )
     if deco["surfaced_owing"]:
         parts.append(f"SURFACED OWING a {row['surfaced_owing']:.0f}m stop")
-    if measured(row.get("min_ndl")) and not deco["technical"]:
-        parts.append(f"NDL {row['min_ndl']:.0f}min")
+    profile = profile_flags(row)
+    if profile["low_reserve"]:
+        parts.append(f"LOW RESERVE {row['end_pressure']:.0f}bar at the end")
+    elif measured(row.get("end_pressure")):
+        parts.append(f"ended on {row['end_pressure']:.0f}bar")
+    if profile["short_stop"]:
+        parts.append(f"SHORT STOP {row['safety_stop_minutes']:.1f}min")
     if measured(row.get("sac_rate")):
         parts.append(f"SAC {row['sac_rate']:.1f}L/min")
     gas = gas_flags(row)
@@ -223,36 +226,11 @@ def _dive_line(row) -> str:
             f"PPO2 {row['max_po2']:.2f}bar on {row['min_o2']:.0f}% oxygen "
             f"(over the {limit:.1f}bar limit)"
         )
-    if gas["density_over_recommended"]:
-        parts.append(f"gas density {row['gas_density']:.1f}g/L at depth")
-    profile = profile_flags(row)
-    if profile["low_reserve"]:
-        parts.append(f"LOW RESERVE {row['end_pressure']:.0f}bar at the end")
-    elif measured(row.get("end_pressure")):
-        parts.append(f"ended on {row['end_pressure']:.0f}bar")
-    if profile["short_stop"]:
-        parts.append(f"SHORT STOP {row['safety_stop_minutes']:.1f}min")
-    if profile["surfaced_mid_dive"]:
-        parts.append(f"SURFACED MID-DIVE {int(row['mid_dive_surfacings'])}x")
-    if profile["sawtooth"]:
-        parts.append(f"SAWTOOTH {int(row['redescents'])} re-descents")
+    back_down = row.get("redescent_metres")
+    if measured(back_down) and back_down > REDESCENT_MANY_M:
+        parts.append(f"re-descents {back_down:.0f}m")
     if measured(row.get("avg_temp")):
-        temp_str = f"temp {row['avg_temp']:.1f}°C"
-        grad = row.get("temp_gradient")
-        if measured(grad) and grad >= THERMOCLINE_C:
-            temp_str += f" (thermocline {grad:.1f}°C)"
-        parts.append(temp_str)
-    flags = thermal_flags(row)
-    if flags["prolonged_cold"]:
-        parts.append(
-            f"PROLONGED COLD {row['cold_minutes']:.0f}min below {COLD_WATER_C:.0f}°C"
-        )
-    if flags["cold_stops"]:
-        parts.append(f"COLD STOPS {row['stop_temp']:.1f}°C")
-    if flags["long_warm"]:
-        parts.append(
-            f"LONG WARM DIVE (water never below {row['water_min_temp']:.1f}°C)"
-        )
+        parts.append(f"temp {row['avg_temp']:.1f}°C")
     return f"  {dive_label(row['dive_number'])} {location}: " + ", ".join(parts)
 
 
@@ -338,8 +316,7 @@ class DiverRoastAgent:
         )
 
         sac = features_df["sac_rate"]
-        ndl = features_df["min_ndl"]
-        thermal = features_df.apply(thermal_flags, axis=1, result_type="expand")
+        ascent = fastest_ascents(features_df)
         decos = features_df.apply(deco_flags, axis=1, result_type="expand")
         agg = (
             f"Aggregates ({n} dives): "
@@ -347,24 +324,13 @@ class DiverRoastAgent:
             f"deepest {features_df['max_depth'].max():.1f}m, "
             f"avg SAC {fmt(sac.mean(), unit=' L/min')}, "
             f"worst SAC {fmt(sac.max(), unit=' L/min')}, "
-            f"avg max ascent {fmt(features_df['max_ascend_speed'].mean(), unit=' m/min')}, "
-            f"fastest ascent {fmt(features_df['max_ascend_speed'].max(), unit=' m/min')} "
-            f"(30 s sustained), "
-            f"{int((features_df['max_shallow_ascend_speed'] > 10).sum())} dives bolted "
-            f"to the surface (>10 m/min from the safety stop, the last "
-            f"{SHALLOW_ZONE_M:.0f} m), "
-            f"lowest NDL {fmt(ndl.min(), '.0f', ' min')}, "
+            f"fastest ascent {fmt(ascent.max(), unit=' m/min')}, "
             f"{int(decos['technical'].sum())} technical dives, "
             f"{int(decos['recreational_deco'].sum())} recreational dives entered deco "
             f"(stops kept on {int((decos['recreational_deco'] & decos['stops_kept']).sum())}), "
             f"{int(decos['missed_stop'].sum())} missed a deco stop, "
             f"{int(decos['surfaced_owing'].sum())} surfaced owing deco | "
-            f"temperature exposure: {temp_exposure_str}, "
-            f"{int((features_df['temp_gradient'] >= THERMOCLINE_C).sum())} dives crossed "
-            f"a thermocline of {THERMOCLINE_C:.0f}°C or more, "
-            f"{int(thermal['prolonged_cold'].sum())} dives with prolonged cold, "
-            f"{int(thermal['cold_stops'].sum())} with cold stops, "
-            f"{int(thermal['long_warm'].sum())} long warm-water dives"
+            f"temperature exposure: {temp_exposure_str}"
         )
         habits = (
             "What the log shows, most common first in each class (dives showing "
@@ -388,47 +354,36 @@ class DiverRoastAgent:
         context_msg = (
             f"[System: The diver has uploaded a dive log containing {len(dive_numbers)} dives. "
             f"{scope}"
-            f"Pre-computed feature summaries are below — use these to identify patterns and "
-            f"dangerous dives. You can still call analyze_dive_profile or get_dive_summary "
-            f"for deeper analysis of specific dives if needed, but you already have the key "
-            f"metrics for every dive. Do NOT ask the user to upload — it's already done. "
+            f"Below is what their dashboard shows them, and it is all a roast may "
+            f"bring up. Do NOT ask the user to upload — it's already done. "
+            f"The roast needs no tools: call analyze_dive_profile or "
+            f"get_dive_summary only when the user asks about one dive. "
             f"When referencing dives, always use the site name, not just the number; "
             f"a dive with no site name recorded isn't named at all: just talk "
             f"about the dive. "
             f"A metric missing from a dive's line was not recorded by the dive computer: "
-            f"say so, never estimate it (ascent rates can't be measured on a dive "
-            f"that stays in the top few metres). 'ascent' is the fastest 30-second sustained "
-            f"ascent rate; 'surfacing' is the fastest final ascent from the safety "
-            f"stop (the last {SHALLOW_ZONE_M:.0f} m), where the pressure change is "
-            f"largest. Both limits are "
-            f"10 m/min. TECH marks a technical dive (trimix, a deco gas or a "
+            f"say so, never estimate it. 'ascent' is the dive's fastest ascent, "
+            f"sustained over 30 seconds or through the last {SHALLOW_ZONE_M:.0f} m "
+            f"to the surface; the limit is {ASCENT_LIMIT_M_MIN:.0f} m/min. "
+            f"TECH marks a technical dive (trimix, a deco gas or a "
             f"rebreather): its deco is planned, not a mistake. ENTERED DECO is a "
             f"recreational dive that went into deco; 'stops kept' means every "
             f"required stop was done. MISSED STOP and SURFACED OWING mean a required "
-            f"stop was skipped. Thermal flags come from water temperature only (not the "
-            f"suit or the diver's body): PROLONGED COLD is {PROLONGED_COLD_MIN:.0f}+ min "
-            f"below {COLD_WATER_C:.0f}°C (hypothermia risk), COLD STOPS means the ascent "
-            f"and stops were in water below {COLD_WATER_C:.0f}°C (slower gas washout, "
-            f"higher DCS risk), LONG WARM DIVE is {LONG_WARM_MIN:.0f}+ min in water of "
-            f"{WARM_WATER_C:.0f}°C or more (dehydration, a DCS factor). "
+            f"stop was skipped. "
             f"LOW RESERVE is a last tank reading underwater below "
             f"{RESERVE_BAR:.0f} bar; the log doesn't show the tank or the plan. "
             f"SHORT STOP is under {SAFETY_STOP_MIN:.0f} min between 3 and 6 m before "
             f"surfacing from a dive deeper than {STOP_EXPECTED_BELOW_M:.0f} m. "
-            f"SURFACED MID-DIVE is coming up to the surface and going back down. "
-            f"SAWTOOTH counts re-descents of {REDESCENT_M:.0f} m or more after an "
-            f"ascent. PPO2 is the oxygen partial pressure at the deepest point "
+            f"PPO2 is the oxygen partial pressure at the deepest point "
             f"for the gas breathed: {PO2_WORKING_BAR:.1f} bar is the working limit, "
-            f"{PO2_LIMIT_BAR:.1f} bar the contingency limit. Gas density at depth "
-            f"is shown above the recommended {GAS_DENSITY_RECOMMENDED_G_L:.1f} g/L "
-            f"({GAS_DENSITY_MAX_G_L:.1f} g/L is the researched maximum). "
-            f"'thermocline' is how much colder the bottom was than the "
-            f"shallows. Findings come in three classes. Limits broken hold for "
-            f"any diver. Thin margins (LOW RESERVE, SHORT STOP, SAWTOOTH, "
-            f"SURFACED MID-DIVE) are the diver's "
-            f"call, as is a dense gas at depth: no limit was broken. Facts (depth on its own, SAC, descent "
-            f"rate, temperature, a low NDL, going into deco and keeping the "
-            f"stops) are neither good nor bad. Start from that "
+            f"{PO2_LIMIT_BAR:.1f} bar the contingency limit. 're-descents' is the "
+            f"metres gone back down after coming up, shown past "
+            f"{REDESCENT_MANY_M:.0f} m. Findings come in three classes. Limits "
+            f"broken hold for any diver. Thin margins (LOW RESERVE, SHORT STOP, deeper than "
+            f"{RECREATIONAL_MAX_M:.0f} m) are the diver's call: no limit was "
+            f"broken. Facts (depth on its own, SAC, re-descents, temperature, a "
+            f"low NDL, going into deco and keeping the stops) are neither good "
+            f"nor bad. Start from that "
             f"summary, not with whichever number comes first on a dive's line.\n\n"
             f"{coverage_line(features_df)}\n\n"
             f"{agg}\n\n{habits}\n\nPer-dive summaries:\n{dive_summary}]"
@@ -481,7 +436,7 @@ class DiverRoastAgent:
         and each anomaly measured in the log, as separate queries. The result
         is for this turn only and is not written to the history.
         """
-        anomalies = anomaly_queries(getattr(self, "features", None))
+        anomalies = anomaly_queries(getattr(self, "features", None), on_dashboard=True)
         # Side by side: each takes ~3 s warm, so in turn they'd add ~6 s.
         with ThreadPoolExecutor(max_workers=2) as pool:
             guidance = pool.submit(

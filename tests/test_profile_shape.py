@@ -229,21 +229,51 @@ def test_habits_rank_what_the_log_repeats_first():
     assert facts == "Facts, not faults: none"
 
 
+def test_habits_count_one_ascent_and_re_descents_in_metres():
+    up, down = list(np.arange(20.0, 12.0, -1.0)), list(np.arange(12.0, 20.0, 1.0))
+    yo_yo = [*_square()[:20], *up, *down, *up, *down, *_square()[20:]]
+    bolt = [*_square()[: -len(SURFACING)], 2.5, 0.0]  # 5 m in 20 s: 15 m/min
+    features = extract_features(
+        pd.concat(
+            [
+                _dive(_square()).assign(dive_number="1"),
+                _dive(yo_yo).assign(dive_number="2"),
+                _dive(bolt).assign(dive_number="3"),
+            ],
+            ignore_index=True,
+        )
+    )
+    limits, _margins, facts = habit_lines(features)
+    assert "ascent over 10 m/min 1/3 dives (33%)" in limits
+    assert "bolted" not in limits and "sustained" not in limits
+    assert "more than 10 m of re-descents 1/3 dives (33%)" in facts
+    assert "sawtooth" not in facts
+
+
+def test_a_stop_that_shows_as_three_minutes_is_not_short():
+    """Seen 2026-10-13: a 2.95 min stop roasted as "a pathetic 3.0 min"."""
+    stop = {"max_depth": 26.6, "entered_deco": False}
+    assert not profile_flags({**stop, "safety_stop_minutes": 2.95})["short_stop"]
+    assert profile_flags({**stop, "safety_stop_minutes": 2.94})["short_stop"]
+
+
 def test_anomaly_queries_cover_gas_and_stops():
     queries = " | ".join(anomaly_queries(extract_features(_log())))
     assert "low on gas" in queries
     assert "omitted safety stop" in queries
 
 
-def test_dive_line_flags_reserve_and_stop_for_the_model():
+def test_dive_line_carries_only_what_the_dashboard_shows():
     from src.agent.conversation import _dive_line
 
     features = extract_features(_log())
     clean, worst = _dive_line(features.iloc[0]), _dive_line(features.iloc[3])
     assert "ended on 80bar" in clean
-    assert "LOW RESERVE" not in clean
+    assert "LOW RESERVE" not in clean and "SHORT STOP" not in clean
     assert "LOW RESERVE 10bar" in worst
     assert "SHORT STOP" in worst
+    # One ascent number: the dashboard has one ascent gauge.
+    assert clean.count("m/min") == 1 and "surfacing" not in clean
 
 
 def test_seed_context_carries_the_habits_line():
@@ -252,9 +282,9 @@ def test_seed_context_carries_the_habits_line():
     agent = DiverRoastAgent()
     agent.set_dive_data(_log())
     context = agent.history[0].parts[0].text
-    assert "ended below 50 bar 3/4 dives (75%)" in context
+    assert "safety stop under 3 min 1/4 dives (25%)" in context
     assert "Limits broken: none" in context
-    assert "ended below 50 bar" in agent.log_facts
+    assert "safety stop under 3 min" in agent.log_facts
 
 
 def test_anomaly_queries_follow_the_logs_most_common_habits():

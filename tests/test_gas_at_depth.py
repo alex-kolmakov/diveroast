@@ -87,5 +87,6 @@ def test_habits_file_depth_under_facts():
     features = pd.DataFrame([_deep(35.0, 21.0), _deep(12.0, 21.0)])
     limits, margins, facts = habit_lines(features)
     assert limits == "Limits broken: none"
-    assert "gas density over the recommended 5.2 g/L" in margins
+    # Gas density has no gauge on the dashboard, so the roast isn't told of it.
+    assert margins.endswith("none")
     assert facts == "Facts, not faults: deeper than 30 m 1/2 dives (50%)"

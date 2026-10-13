@@ -105,7 +105,8 @@ def profile_flags(row) -> dict[str, bool]:
     show, so its last tank reading isn't judged; a dive in deco is judged by
     its deco stops, not by the safety stop. Re-descents and surfacings only
     count on dives deeper than ``STOP_EXPECTED_BELOW_M``: on a shallow
-    training dive they are drills.
+    training dive they are drills. A stop is short only if it reads short at
+    the one decimal it is shown with: 2.95 min is a 3.0 min stop.
     """
     end = row.get("end_pressure")
     stop = row.get("safety_stop_minutes")
@@ -118,7 +119,7 @@ def profile_flags(row) -> dict[str, bool]:
         and end < RESERVE_BAR
         and not bool(row.get("technical")),
         "short_stop": measured(stop)
-        and stop < SAFETY_STOP_MIN
+        and round(float(stop), 1) < SAFETY_STOP_MIN
         and not bool(row.get("entered_deco")),
         "sawtooth": deep_enough
         and measured(redescents)
@@ -143,9 +144,10 @@ LIMIT = "limit"
 MARGIN = "margin"
 RECREATIONAL_MAX_M = 40.0  # beyond the range recreational training covers
 NDL_MARGIN_MIN = 10.0
-RESERVE_THIN_BAR = 30.0
+RESERVE_THIN_BAR = 25.0
 SAFETY_STOP_THIN_MIN = 1.0
 SAWTOOTH_MANY_REDESCENTS = 3
+REDESCENT_MANY_M = 10.0  # total metres back down: the top band of the gauge
 SUSTAINED_ASCENT_WATCH_M_MIN = 9.0  # the stricter of the two usual ascent limits
 BOLT_HARD_M_MIN = 15.0
 
@@ -212,6 +214,21 @@ def dive_findings(row) -> dict[str, tuple[str, float]]:
     if (row.get("max_depth") or 0) > RECREATIONAL_MAX_M and not deco["technical"]:
         found["deeper than 40 m"] = (MARGIN, 1.0)
     return found
+
+
+def fastest_ascent(row) -> float | None:
+    """A dive's one ascent number, as the dashboard shows it: the faster of
+    the sustained rate and the final ascent from the safety stop. Both are
+    held to the same limit. None if neither could be measured."""
+    rates = [row.get("max_ascend_speed"), row.get("max_shallow_ascend_speed")]
+    recorded = [float(rate) for rate in rates if measured(rate)]
+    return max(recorded) if recorded else None
+
+
+def fastest_ascents(features: pd.DataFrame) -> pd.Series:
+    """``fastest_ascent`` for every dive; NaN where neither rate was measured."""
+    rates = features.reindex(columns=["max_ascend_speed", "max_shallow_ascend_speed"])
+    return rates.astype(float).max(axis=1)
 
 
 def measured(value) -> bool:
@@ -683,7 +700,9 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
 
     Most common share first, habits no dive shows left out. Lets a reader
     tell what the log keeps repeating from what happened once, and a broken
-    limit from a thin margin or a plain fact.
+    limit from a thin margin or a plain fact. Only what the dashboard has a
+    gauge for is counted: the roast sits above it, and a number the diver
+    can't find there reads as made up.
     """
     n = len(features)
 
@@ -694,16 +713,10 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
         return int(mask.sum())
 
     deco = features.apply(deco_flags, axis=1, result_type="expand")
-    thermal = features.apply(thermal_flags, axis=1, result_type="expand")
     profile = features.apply(profile_flags, axis=1, result_type="expand")
     gas = features.apply(gas_flags, axis=1, result_type="expand")
+    ascent = fastest_ascents(features)
     recreational = ~deco["technical"]
-    below_stop_depth = count(features["max_depth"] > STOP_EXPECTED_BELOW_M)
-    low_ndl = (
-        recreational & ~deco["recreational_deco"] & (col("min_ndl") < NDL_DANGER_MIN)
-    )
-    temps = count(col("water_min_temp").notna())
-    po2_known = count(col("max_po2").notna())
     habits = [
         (
             LIMIT,
@@ -715,20 +728,13 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
             LIMIT,
             f"oxygen pressure over the {PO2_WORKING_BAR:.1f} bar working limit",
             count(gas["po2_over_working"]),
-            po2_known,
+            count(col("max_po2").notna()),
         ),
         (
             LIMIT,
-            f"bolted to the surface (over {SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min "
-            f"from the safety stop)",
-            count(col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN),
-            count(col("max_shallow_ascend_speed").notna()),
-        ),
-        (
-            LIMIT,
-            f"sustained ascent over {ASCENT_LIMIT_M_MIN:.0f} m/min",
-            count(col("max_ascend_speed") > ASCENT_LIMIT_M_MIN),
-            count(col("max_ascend_speed").notna()),
+            f"ascent over {ASCENT_LIMIT_M_MIN:.0f} m/min",
+            count(ascent > ASCENT_LIMIT_M_MIN),
+            count(ascent.notna()),
         ),
         (
             MARGIN,
@@ -742,39 +748,17 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
             count(profile["short_stop"]),
             count(col("safety_stop_minutes").notna()),
         ),
-        (MARGIN, "sawtooth profile", count(profile["sawtooth"]), below_stop_depth),
-        (
-            MARGIN,
-            "surfaced mid-dive",
-            count(profile["surfaced_mid_dive"]),
-            below_stop_depth,
-        ),
-        (
-            MARGIN,
-            f"gas density over the recommended {GAS_DENSITY_RECOMMENDED_G_L:.1f} g/L "
-            f"at depth",
-            count(gas["density_over_recommended"]),
-            po2_known,
-        ),
         (
             MARGIN,
             f"deeper than {RECREATIONAL_MAX_M:.0f} m",
             count((features["max_depth"] > RECREATIONAL_MAX_M) & recreational),
             n,
         ),
-        (MARGIN, "prolonged cold", count(thermal["prolonged_cold"]), temps),
-        (MARGIN, "cold stops", count(thermal["cold_stops"]), temps),
         (
             FACT,
             "went into deco on a recreational dive and kept the stops",
             count(deco["recreational_deco"] & deco["stops_kept"]),
             n,
-        ),
-        (
-            FACT,
-            f"NDL under {NDL_DANGER_MIN:.0f} min",
-            count(low_ndl),
-            count(col("min_ndl").notna()),
         ),
         (FACT, f"deeper than {DEEP_M:.0f} m", count(features["max_depth"] > DEEP_M), n),
         (
@@ -785,11 +769,10 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
         ),
         (
             FACT,
-            f"descent over {FAST_DESCENT_M_MIN:.0f} m/min",
-            count(profile["fast_descent"]),
-            count(col("max_descent_speed").notna()),
+            f"more than {REDESCENT_MANY_M:.0f} m of re-descents",
+            count(col("redescent_metres") > REDESCENT_MANY_M),
+            count(col("redescent_metres").notna()),
         ),
-        (FACT, "long warm-water dive", count(thermal["long_warm"]), temps),
     ]
     shown = [h for h in habits if h[2] > 0 and h[3] > 0]
     return sorted(shown, key=lambda h: h[2] / h[3], reverse=True)
@@ -819,8 +802,14 @@ def habit_lines(features: pd.DataFrame) -> list[str]:
 MAX_ANOMALY_QUERIES = 6
 
 
-def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
+def anomaly_queries(
+    features: pd.DataFrame | None, on_dashboard: bool = False
+) -> list[str]:
     """One DAN search phrase per anomaly actually measured in the log.
+
+    ``on_dashboard`` keeps only the anomalies the dashboard has a gauge for:
+    material about anything else invites a roast of a number the diver can't
+    see.
 
     The most common anomalies come first and at most ``MAX_ANOMALY_QUERIES``
     are kept, so the material follows what this log repeats. A missed or
@@ -844,47 +833,61 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
     always = pd.Series(True, index=features.index)
     never = pd.Series(False, index=features.index)
     missed = deco["missed_stop"] | deco["surfaced_owing"] if has_deco else never
+    # (dives showing it, search phrase, has a gauge on the dashboard)
     candidates = [
         # A skipped stop leads however rare it is.
         (
             always if missed.any() else never,
             "missed decompression stop omitted deco surfaced",
+            True,
         ),
         (
             col("max_ascend_speed") > ASCENT_LIMIT_M_MIN,
             "rapid ascent decompression sickness",
+            True,
         ),
         (
             col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN,
             "fast final ascent to surface safety stop skipped",
+            True,
         ),
         (
             profile["low_reserve"],
             "out of air low on gas running out of breathing gas",
+            True,
         ),
-        (profile["short_stop"], "omitted safety stop"),
+        (profile["short_stop"], "omitted safety stop", True),
         (
             profile["sawtooth"] | profile["surfaced_mid_dive"],
             "sawtooth profile repeated ascents yo-yo diving",
+            True,
         ),
         (
             gas["po2_over_working"],
             "oxygen toxicity nitrox maximum operating depth exceeded",
+            True,
         ),
         (
             thermal["prolonged_cold"],
             "hypothermia cold water exposure thermal protection",
+            False,
         ),
         (
             thermal["cold_stops"],
             "cold during decompression thermal status DCS risk",
+            False,
         ),
         (
             thermal["long_warm"],
             "dehydration warm water decompression sickness hydration",
+            False,
         ),
     ]
-    found = [(float(mask.mean()), phrase) for mask, phrase in candidates if mask.any()]
+    found = [
+        (float(mask.mean()), phrase)
+        for mask, phrase, shown in candidates
+        if mask.any() and (shown or not on_dashboard)
+    ]
     found.sort(key=lambda item: item[0], reverse=True)  # stable: ties keep this order
     return [phrase for _, phrase in found[:MAX_ANOMALY_QUERIES]]
 

@@ -113,7 +113,7 @@ def test_thermal_anomalies_search_dan():
     assert "dehydration" in queries
 
 
-def test_the_roast_context_carries_the_flags():
+def test_the_roast_stays_off_thermal_flags_the_dashboard_has_no_gauge_for():
     from src.agent.conversation import DiverRoastAgent
 
     agent = DiverRoastAgent()
@@ -127,9 +127,11 @@ def test_the_roast_context_carries_the_flags():
         )
     )
     seed = agent.history[0].parts[0].text
-    assert "PROLONGED COLD" in seed and "COLD STOPS 8.0°C" in seed
-    assert "LONG WARM DIVE (water never below 30.0°C)" in seed
-    assert (
-        "1 dives with prolonged cold, 1 with cold stops, 1 long warm-water dives"
-        in seed
-    )
+    lines = seed.split("Per-dive summaries:")[1]
+    for flag in ("PROLONGED COLD", "COLD STOPS", "LONG WARM", "thermocline"):
+        assert flag not in lines
+    assert "prolonged cold" not in agent.log_facts
+    assert "warm-water" not in agent.log_facts
+    # The DAN material for the roast follows the same rule.
+    searched = " | ".join(anomaly_queries(agent.features, on_dashboard=True))
+    assert "hypothermia" not in searched and "dehydration" not in searched
