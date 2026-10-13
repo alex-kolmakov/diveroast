@@ -42,7 +42,9 @@ function MetricPanel({
   exposure?: Record<string, number>;
   extra?: React.ReactNode; // one more gauge, built from the dives themselves
 }) {
-  if (metrics.length === 0) return null;
+  // A metric no dive recorded has nothing to draw: leave its card out.
+  const recorded = metrics.filter((metric) => metric.per_dive.length > 0);
+  if (recorded.length === 0 && !extra) return null;
   return (
     <div>
       <div className="mb-4">
@@ -50,7 +52,7 @@ function MetricPanel({
         <p className="text-xs text-muted-foreground">{note}</p>
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-        {metrics.map((metric) => (
+        {recorded.map((metric) => (
           <Card key={metric.label}>
             <CardContent className="px-4 pt-4">
               {metricKind(metric.label) === "temp" ? (
@@ -92,6 +94,14 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
     ? `Dive #${data.single_dive!.dive_number}${site && site !== "N/A" ? ` · ${site}` : ""}`
     : `${total} ${total === 1 ? "dive" : "dives"}`;
   const worst = data.top_problematic_dives;
+  // Stops are only expected on dives deep enough for one, or in deco.
+  const hasStops = data.all_dives.some(
+    (d) =>
+      d.safety_stop_minutes != null ||
+      d.entered_deco ||
+      (d.missed_stop_minutes ?? 0) > 0 ||
+      (d.surfaced_owing ?? 0) > 0
+  );
 
   return (
     <div className="h-full overflow-y-auto">
@@ -136,9 +146,9 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
             />
             <MetricPanel
               title="Limits"
-              note="Lines any diver is held to. Red is a limit broken."
+              note="Lines any diver is held to. Red is a limit broken, amber a thin margin."
               metrics={data.metrics.filter((m) => !isDescriptive(m))}
-              extra={<StopsGauge dives={data.all_dives} />}
+              extra={hasStops ? <StopsGauge dives={data.all_dives} /> : undefined}
             />
 
             {worst.length > 0 && (
