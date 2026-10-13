@@ -38,6 +38,26 @@ STOP_TOLERANCE_M = 1.0
 # An NDL of 0 is only a real reading if the computer counted down to it.
 NDL_COUNTDOWN_MAX_MIN = 5.0
 
+# Profile shape. A re-descent counts once the diver has come up by
+# REDESCENT_M and then gone back down by as much: a sawtooth tooth, not a
+# wobble over a reef. The safety stop is the time between the STOP_BAND_M
+# depths after the last time below STOP_APPROACH_M, and is only expected on
+# dives deeper than STOP_EXPECTED_BELOW_M.
+REDESCENT_M = 5.0
+RESUBMERGED_M = 3.0  # back below this after surfacing: the dive went on
+STOP_BAND_M = (2.5, 6.5)
+STOP_APPROACH_M = 8.0
+STOP_EXPECTED_BELOW_M = 10.0
+
+# A computer starts the dive at air temperature and takes minutes to settle,
+# so the thermocline is read only after TEMP_SETTLE_S, as the gap between the
+# shallows (the top THERMOCLINE_SHALLOW_FRACTION of the dive, at least
+# THERMOCLINE_SHALLOW_M) and the bottom (the deepest fifth).
+TEMP_SETTLE_S = 300.0
+THERMOCLINE_SHALLOW_FRACTION = 0.35
+THERMOCLINE_SHALLOW_M = 6.0
+THERMOCLINE_BOTTOM_FRACTION = 0.8
+
 
 def _window_rates(
     times: np.ndarray, depths: np.ndarray, window_s: float
@@ -231,6 +251,116 @@ def calculate_ascend_speed(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=ASCENT_COLUMNS)
 
 
+def count_redescents(depths: np.ndarray) -> int:
+    """Re-descents of ``REDESCENT_M`` or more after an ascent of the same size.
+
+    A plain down-then-up profile counts 0; every sawtooth tooth adds 1.
+    """
+    count = 0
+    direction = 0  # 1 = descending, -1 = ascending
+    pivot = depths[0] if len(depths) else 0.0
+    for depth in depths:
+        if direction == 0:
+            if depth >= pivot + REDESCENT_M:
+                direction, pivot = 1, depth
+            elif depth <= pivot - REDESCENT_M:
+                direction, pivot = -1, depth
+        elif direction == 1:
+            if depth > pivot:
+                pivot = depth
+            elif depth <= pivot - REDESCENT_M:
+                direction, pivot = -1, depth
+        elif depth < pivot:
+            pivot = depth
+        elif depth >= pivot + REDESCENT_M:
+            direction, pivot = 1, depth
+            count += 1
+    return count
+
+
+def _mid_dive_surfacings(depths: np.ndarray) -> int:
+    """Arrivals at the surface from below RESUBMERGED_M that went back below it."""
+    at_surface = depths < SURFACE_M
+    arrivals = np.nonzero(at_surface[1:] & ~at_surface[:-1])[0] + 1
+    return sum(
+        1
+        for i in arrivals
+        if depths[:i].max() > RESUBMERGED_M and depths[i:].max() > RESUBMERGED_M
+    )
+
+
+def _safety_stop_minutes(times: np.ndarray, depths: np.ndarray) -> float:
+    """Minutes in the stop band after the last time below STOP_APPROACH_M.
+
+    NaN on a dive too shallow to expect a stop, or when the log ends before
+    the diver leaves the stop band for the surface.
+    """
+    if depths.max() <= STOP_EXPECTED_BELOW_M:
+        return float("nan")
+    last_deep = np.nonzero(depths > STOP_APPROACH_M)[0][-1]
+    step = np.diff(times, append=times[-1])[last_deep + 1 :]
+    tail = depths[last_deep + 1 :]
+    shallow, deep = STOP_BAND_M
+    if not len(tail) or tail.min() >= shallow:
+        return float("nan")
+    return float(step[(tail >= shallow) & (tail <= deep)].sum() / 60)
+
+
+def _thermocline(dive: pd.DataFrame) -> float:
+    """Degrees the bottom was colder than the shallows; NaN if it can't be told.
+
+    Uses readings carried forward, in the water, after the sensor has settled.
+    """
+    depths = dive["depth"].to_numpy(dtype=float)
+    times = dive["time"].to_numpy(dtype=float)
+    temps = dive["temperature"].ffill().to_numpy(dtype=float)
+    deepest = depths.max() if len(depths) else 0.0
+    if deepest <= STOP_EXPECTED_BELOW_M:
+        return float("nan")
+    usable = (
+        ~np.isnan(temps) & (times - times[0] > TEMP_SETTLE_S) & (depths >= IN_WATER_M)
+    )
+    shallow_limit = max(THERMOCLINE_SHALLOW_FRACTION * deepest, THERMOCLINE_SHALLOW_M)
+    shallow = temps[usable & (depths <= shallow_limit)]
+    bottom = temps[usable & (depths >= THERMOCLINE_BOTTOM_FRACTION * deepest)]
+    if not len(shallow) or not len(bottom):
+        return float("nan")
+    return float(max(np.median(shallow) - np.median(bottom), 0.0))
+
+
+def _profile(dive: pd.DataFrame) -> dict[str, float]:
+    """Profile-shape and gas features for one dive (sorted by time).
+
+    NaN where the log can't show it: no full 30 s window for the descent
+    rate, a dive too shallow to expect a safety stop, no tank pressure.
+    """
+    times = dive["time"].to_numpy(dtype=float)
+    depths = dive["depth"].to_numpy(dtype=float)
+    rates, _ = _window_rates(times, depths, ASCENT_WINDOW_S)
+    descents = -rates[~np.isnan(rates)]
+    # The last reading taken underwater: the pod keeps logging on the boat.
+    pressure = dive["pressure"][dive["depth"] >= SURFACE_M].dropna()
+    return {
+        "max_descent_speed": float(max(descents.max(), 0.0))
+        if len(descents)
+        else float("nan"),
+        "redescents": count_redescents(depths),
+        "mid_dive_surfacings": _mid_dive_surfacings(depths),
+        "safety_stop_minutes": _safety_stop_minutes(times, depths),
+        "end_pressure": float(pressure.iloc[-1]) if len(pressure) else float("nan"),
+        "temp_gradient": _thermocline(dive),
+    }
+
+
+def profile_shape(data: pd.DataFrame) -> pd.DataFrame:
+    """Per-dive profile-shape and gas features, from data sorted by dive and time."""
+    rows = [
+        {"dive_number": number, **_profile(dive)}
+        for number, dive in data.groupby("dive_number", sort=False)
+    ]
+    return pd.DataFrame(rows)
+
+
 def _thermal(dive: pd.DataFrame) -> dict[str, float]:
     """Exposure features for one dive (sorted by time); NaN if not recorded.
 
@@ -399,14 +529,11 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     features = features.merge(ascend_speed_features, on="dive_number")
     features = features.merge(thermal_exposure(data), on="dive_number")
     features = features.merge(deco_adherence(data), on="dive_number")
+    # Includes temp_gradient: the thermocline, not the spread of all readings
+    # (which is mostly the sensor cooling down from air temperature).
+    features = features.merge(profile_shape(data), on="dive_number")
     features["tech_reason"] = features.apply(technical_reason, axis=1)
     features["technical"] = features["tech_reason"] != ""
-
-    # Temperature gradient: difference between warmest (surface) and coldest (depth)
-    # Captures the thermocline the diver crossed within the dive.
-    features["temp_gradient"] = (features["max_temp"] - features["min_temp"]).clip(
-        lower=0
-    )
 
     return features
 
