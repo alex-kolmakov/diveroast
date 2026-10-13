@@ -31,7 +31,8 @@ def gas_profile(dive) -> dict:
     give the gas as an O2 value, or (older files) as ``value`` = O2 %, or
     only as a cylinder index. ``o2_spread`` is the richest gas breathed minus
     the leanest: a switch to a deco gas shows as a big spread, a re-set from
-    EAN28 to EAN29 doesn't. None when the dive lists no cylinders, no gas
+    EAN28 to EAN29 doesn't. ``min_o2`` is the leanest gas breathed, the one
+    taken to the bottom. None when the dive lists no cylinders, no gas
     events and no dive computer.
     """
     cylinders = dive.findall("cylinder")
@@ -56,6 +57,7 @@ def gas_profile(dive) -> dict:
         "max_helium": max(helium) if helium else None,
         "gas_count": len(set(breathed)) if breathed else None,
         "o2_spread": max(breathed) - min(breathed) if breathed else None,
+        "min_o2": min(breathed) if breathed else None,
         "dive_mode": (computer.get("dctype") or "OC").upper()
         if computer is not None
         else None,

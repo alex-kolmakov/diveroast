@@ -42,6 +42,7 @@ def test_extract_all_dive_profiles_refined():
         "max_helium",
         "gas_count",
         "o2_spread",
+        "min_o2",
         "dive_mode",
     }
     assert len(df) == 37882, "Dataframe should have 37882 rows"

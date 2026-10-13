@@ -165,6 +165,7 @@ def test_subsurface_gases_and_mode():
         "max_helium": 35.0,
         "gas_count": 2,
         "o2_spread": 29.0,
+        "min_o2": 21.0,
         "dive_mode": "OC",
     }
 

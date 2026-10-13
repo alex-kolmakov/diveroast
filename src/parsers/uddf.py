@@ -44,6 +44,7 @@ COLUMNS = [
     "max_helium",
     "gas_count",
     "o2_spread",
+    "min_o2",
     "dive_mode",
 ]
 
@@ -138,6 +139,7 @@ def _gas_profile(dive, mixes: dict[str, tuple[float, float]]) -> dict:
         "max_helium": max((b[1] for b in breathed), default=None),
         "gas_count": len(set(breathed)) if breathed else None,
         "o2_spread": max(o2) - min(o2) if o2 else None,
+        "min_o2": min(o2) if o2 else None,
         "dive_mode": _DIVE_MODES.get(mode or "opencircuit", (mode or "OC").upper()),
     }
 
@@ -234,7 +236,7 @@ def parse_uddf_root(root) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=COLUMNS)
     numeric = ["time", "depth", "temperature", "pressure", "rbt", "ndl", "in_deco"]
     numeric += ["sac_rate", "latitude", "longitude", "stop_depth", "max_helium"]
-    numeric += ["gas_count", "o2_spread"]
+    numeric += ["gas_count", "o2_spread", "min_o2"]
     frame[numeric] = frame[numeric].astype(float)
     return frame
 

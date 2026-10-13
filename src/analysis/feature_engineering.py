@@ -35,6 +35,18 @@ TECH_MODES = {"CCR", "PSCR"}
 # more than this, counts as missing it (waves and sensor noise below it).
 STOP_TOLERANCE_M = 1.0
 
+# The gas at the deepest point. Oxygen partial pressure has a working limit
+# and a contingency limit that hold for any diver; gas density has a
+# recommended ceiling and a maximum (Anthony & Mitchell 2016), above which CO2
+# retention climbs. Both are judged for the leanest gas breathed, the one
+# taken to the bottom, at 1 bar per 10 m. A rebreather sets its own ppO2, so
+# neither is computed for one.
+PO2_WORKING_BAR = 1.4
+PO2_LIMIT_BAR = 1.6
+GAS_DENSITY_RECOMMENDED_G_L = 5.2
+GAS_DENSITY_MAX_G_L = 6.2
+O2_G_L, N2_G_L, HE_G_L = 1.428, 1.251, 0.179  # at 0 °C and 1 atm
+
 # An NDL of 0 is only a real reading if the computer counted down to it.
 NDL_COUNTDOWN_MAX_MIN = 5.0
 
@@ -451,6 +463,26 @@ def deco_adherence(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def gas_at_depth(row) -> dict[str, float]:
+    """Oxygen partial pressure (bar) and gas density (g/L) at the deepest point.
+
+    NaN when the log doesn't name the gas, or on a rebreather.
+    """
+    out = {"max_po2": np.nan, "gas_density": np.nan}
+    o2 = row.get("min_o2")
+    if o2 is None or pd.isna(o2) or row.get("dive_mode") in TECH_MODES:
+        return out
+    helium = row.get("max_helium")
+    f_o2 = float(o2) / 100
+    f_he = 0.0 if helium is None or pd.isna(helium) else float(helium) / 100
+    ambient = 1.0 + float(row["max_depth"]) / 10
+    out["max_po2"] = ambient * f_o2
+    out["gas_density"] = ambient * (
+        f_o2 * O2_G_L + f_he * HE_G_L + (1 - f_o2 - f_he) * N2_G_L
+    )
+    return out
+
+
 def technical_reason(row) -> str:
     """Why a dive counts as technical ("" if it doesn't), from its gases."""
     reasons = []
@@ -497,6 +529,7 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
             "longitude",
             "max_helium",
             "o2_spread",
+            "min_o2",
             "dive_mode",
         )
         if col in data.columns
@@ -532,6 +565,8 @@ def extract_features(df: pd.DataFrame) -> pd.DataFrame:
     # Includes temp_gradient: the thermocline, not the spread of all readings
     # (which is mostly the sensor cooling down from air temperature).
     features = features.merge(profile_shape(data), on="dive_number")
+    gas = features.apply(gas_at_depth, axis=1, result_type="expand")
+    features[["max_po2", "gas_density"]] = gas[["max_po2", "gas_density"]]
     features["tech_reason"] = features.apply(technical_reason, axis=1)
     features["technical"] = features["tech_reason"] != ""
 

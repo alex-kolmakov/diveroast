@@ -62,6 +62,7 @@ COLUMNS = [
     "max_helium",
     "gas_count",
     "o2_spread",
+    "min_o2",
     "dive_mode",
 ]
 
@@ -187,7 +188,7 @@ def messages_to_frame(
     )
     numeric = ["time", "depth", "temperature", "pressure", "rbt", "ndl", "in_deco"]
     numeric += ["sac_rate", "latitude", "longitude", "stop_depth", "max_helium"]
-    numeric += ["gas_count", "o2_spread"]
+    numeric += ["gas_count", "o2_spread", "min_o2"]
     frame[numeric] = frame[numeric].astype(float)  # None -> NaN, like Subsurface
     return frame[COLUMNS]
 
@@ -217,6 +218,7 @@ def _gas_profile(messages: dict[str, list[dict]], sub_sport) -> dict:
         "max_helium": max((b[1] for b in breathed), default=None),
         "gas_count": len(set(breathed)) if breathed else None,
         "o2_spread": max(o2) - min(o2) if o2 else None,
+        "min_o2": min(o2) if o2 else None,
         "dive_mode": "CCR" if sub_sport == "ccr_diving" else "OC",
     }
 
