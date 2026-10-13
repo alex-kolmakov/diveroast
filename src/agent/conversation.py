@@ -23,7 +23,9 @@ from src.agent.tools import DIVE_DATA_TOOLS, TOOL_DECLARATIONS, TOOL_FUNCTIONS
 from src.agent.usage import record_check, record_usage
 from src.analysis.feature_engineering import (
     COLD_WATER_C,
+    REDESCENT_M,
     SHALLOW_ZONE_M,
+    STOP_EXPECTED_BELOW_M,
     extract_features,
 )
 from src.config import settings
@@ -31,8 +33,12 @@ from src.observability import get_tracer
 from src.rag.search import Retrieval
 from src.tools import dan
 from src.tools.dive import (
+    FAST_DESCENT_M_MIN,
     LONG_WARM_MIN,
     PROLONGED_COLD_MIN,
+    RESERVE_BAR,
+    SAFETY_STOP_MIN,
+    THERMOCLINE_C,
     WARM_WATER_C,
     anomaly_queries,
     build_anomaly_keywords,
@@ -40,7 +46,9 @@ from src.tools.dive import (
     deco_flags,
     dive_label,
     fmt,
+    habit_lines,
     measured,
+    profile_flags,
     thermal_flags,
 )
 
@@ -204,11 +212,24 @@ def _dive_line(row) -> str:
         parts.append(f"NDL {row['min_ndl']:.0f}min")
     if measured(row.get("sac_rate")):
         parts.append(f"SAC {row['sac_rate']:.1f}L/min")
+    profile = profile_flags(row)
+    if profile["low_reserve"]:
+        parts.append(f"LOW RESERVE {row['end_pressure']:.0f}bar at the end")
+    elif measured(row.get("end_pressure")):
+        parts.append(f"ended on {row['end_pressure']:.0f}bar")
+    if profile["short_stop"]:
+        parts.append(f"SHORT STOP {row['safety_stop_minutes']:.1f}min")
+    if profile["surfaced_mid_dive"]:
+        parts.append(f"SURFACED MID-DIVE {int(row['mid_dive_surfacings'])}x")
+    if profile["sawtooth"]:
+        parts.append(f"SAWTOOTH {int(row['redescents'])} re-descents")
+    if profile["fast_descent"]:
+        parts.append(f"FAST DESCENT {row['max_descent_speed']:.1f}m/min")
     if measured(row.get("avg_temp")):
         temp_str = f"temp {row['avg_temp']:.1f}°C"
         grad = row.get("temp_gradient")
-        if measured(grad) and grad > 1:
-            temp_str += f" (gradient {grad:.1f}°C)"
+        if measured(grad) and grad >= THERMOCLINE_C:
+            temp_str += f" (thermocline {grad:.1f}°C)"
         parts.append(temp_str)
     flags = thermal_flags(row)
     if flags["prolonged_cold"]:
@@ -328,10 +349,15 @@ class DiverRoastAgent:
             f"{int(decos['missed_stop'].sum())} missed a deco stop, "
             f"{int(decos['surfaced_owing'].sum())} surfaced owing deco | "
             f"temperature exposure: {temp_exposure_str}, "
-            f"avg thermocline gradient {fmt(features_df['temp_gradient'].mean(), unit='°C')}, "
+            f"{int((features_df['temp_gradient'] >= THERMOCLINE_C).sum())} dives crossed "
+            f"a thermocline of {THERMOCLINE_C:.0f}°C or more, "
             f"{int(thermal['prolonged_cold'].sum())} dives with prolonged cold, "
             f"{int(thermal['cold_stops'].sum())} with cold stops, "
             f"{int(thermal['long_warm'].sum())} long warm-water dives"
+        )
+        habits = (
+            "Habits, most common first (dives showing it / dives where it could "
+            "be measured): " + "; ".join(habit_lines(features_df))
         )
 
         # Cap at 200 dives in context to avoid token bloat
@@ -346,7 +372,7 @@ class DiverRoastAgent:
             if len(dive_numbers) == 1
             else ""
         )
-        self.log_facts = f"{coverage_line(features_df)}\n{agg}"
+        self.log_facts = f"{coverage_line(features_df)}\n{agg}\n{habits}"
         context_msg = (
             f"[System: The diver has uploaded a dive log containing {len(dive_numbers)} dives. "
             f"{scope}"
@@ -372,9 +398,19 @@ class DiverRoastAgent:
             f"below {COLD_WATER_C:.0f}°C (hypothermia risk), COLD STOPS means the ascent "
             f"and stops were in water below {COLD_WATER_C:.0f}°C (slower gas washout, "
             f"higher DCS risk), LONG WARM DIVE is {LONG_WARM_MIN:.0f}+ min in water of "
-            f"{WARM_WATER_C:.0f}°C or more (dehydration, a DCS factor).\n\n"
+            f"{WARM_WATER_C:.0f}°C or more (dehydration, a DCS factor). "
+            f"LOW RESERVE is a last tank reading underwater below "
+            f"{RESERVE_BAR:.0f} bar; the log doesn't show the tank or the plan. "
+            f"SHORT STOP is under {SAFETY_STOP_MIN:.0f} min between 3 and 6 m before "
+            f"surfacing from a dive deeper than {STOP_EXPECTED_BELOW_M:.0f} m. "
+            f"SURFACED MID-DIVE is coming up to the surface and going back down. "
+            f"SAWTOOTH counts re-descents of {REDESCENT_M:.0f} m or more after an "
+            f"ascent. FAST DESCENT is over {FAST_DESCENT_M_MIN:.0f} m/min sustained "
+            f"for 30 s. 'thermocline' is how much colder the bottom was than the "
+            f"shallows. The habits line ranks what the log repeats: start there, "
+            f"not with whichever number comes first on a dive's line.\n\n"
             f"{coverage_line(features_df)}\n\n"
-            f"{agg}\n\nPer-dive summaries:\n{dive_summary}]"
+            f"{agg}\n\n{habits}\n\nPer-dive summaries:\n{dive_summary}]"
         )
         self.history.append(
             types.Content(

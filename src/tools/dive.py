@@ -18,8 +18,10 @@ from src.analysis.feature_engineering import (
     ASCENT_LIMIT_M_MIN,
     ASCENT_WINDOW_S,
     COLD_WATER_C,
+    REDESCENT_M,
     SHALLOW_ASCENT_LIMIT_M_MIN,
     SHALLOW_ZONE_M,
+    STOP_EXPECTED_BELOW_M,
     data_coverage,
     extract_features,
 )
@@ -32,6 +34,14 @@ DEEP_M = 30.0
 PROLONGED_COLD_MIN = 30.0  # minutes below COLD_WATER_C: hypothermia risk
 WARM_WATER_C = 29.0  # coldest in-water reading at or above this: warm dive
 LONG_WARM_MIN = 60.0  # ...for this long: dehydration, a DCS factor
+
+# Profile and gas screening thresholds (diving conventions and heuristics, not
+# DAN limits). The log has the last tank reading, not how the gas was planned.
+RESERVE_BAR = 50.0  # the usual reserve to surface with
+SAFETY_STOP_MIN = 3.0  # the usual stop: 3 min at 5 m
+SAWTOOTH_REDESCENTS = 2
+FAST_DESCENT_M_MIN = 18.0
+THERMOCLINE_C = 3.0  # a gap this size between shallows and bottom is worth a mention
 
 
 # Underwater time above a required stop shorter than this is sensor noise or
@@ -81,6 +91,36 @@ def thermal_flags(row) -> dict[str, bool]:
         and water >= WARM_WATER_C
         and measured(minutes)
         and minutes >= LONG_WARM_MIN,
+    }
+
+
+def profile_flags(row) -> dict[str, bool]:
+    """Which gas and profile-shape habits the measured data supports for one dive.
+
+    NaN never raises a flag. A technical dive carries gas the log may not
+    show, so its last tank reading isn't judged; a dive in deco is judged by
+    its deco stops, not by the safety stop. Re-descents and surfacings only
+    count on dives deeper than ``STOP_EXPECTED_BELOW_M``: on a shallow
+    training dive they are drills.
+    """
+    end = row.get("end_pressure")
+    stop = row.get("safety_stop_minutes")
+    descent = row.get("max_descent_speed")
+    redescents = row.get("redescents")
+    surfacings = row.get("mid_dive_surfacings")
+    deep_enough = (row.get("max_depth") or 0) > STOP_EXPECTED_BELOW_M
+    return {
+        "low_reserve": measured(end)
+        and end < RESERVE_BAR
+        and not bool(row.get("technical")),
+        "short_stop": measured(stop)
+        and stop < SAFETY_STOP_MIN
+        and not bool(row.get("entered_deco")),
+        "sawtooth": deep_enough
+        and measured(redescents)
+        and redescents >= SAWTOOTH_REDESCENTS,
+        "surfaced_mid_dive": deep_enough and measured(surfacings) and surfacings >= 1,
+        "fast_descent": measured(descent) and descent > FAST_DESCENT_M_MIN,
     }
 
 
@@ -193,6 +233,30 @@ def describe_features(row) -> str:
         parts.append(
             f"water during ascent and stops {fmt(row['stop_temp'], unit=' °C')}"
         )
+    if measured(row.get("temp_gradient")):
+        parts.append(
+            f"thermocline {fmt(row['temp_gradient'], unit=' °C')} "
+            f"(shallows warmer than the bottom)"
+        )
+    if measured(row.get("max_descent_speed")):
+        parts.append(
+            f"max descent rate {fmt(row['max_descent_speed'], unit=' m/min')} "
+            f"({ASCENT_WINDOW_S:.0f} s average)"
+        )
+    if measured(row.get("redescents")):
+        parts.append(
+            f"re-descents of {REDESCENT_M:.0f} m or more {int(row['redescents'])}"
+        )
+    if measured(row.get("mid_dive_surfacings")):
+        parts.append(f"mid-dive surfacings {int(row['mid_dive_surfacings'])}")
+    if measured(row.get("safety_stop_minutes")):
+        parts.append(
+            f"time at the safety stop {fmt(row['safety_stop_minutes'], unit=' min')}"
+        )
+    if measured(row.get("end_pressure")):
+        parts.append(
+            f"last tank reading underwater {fmt(row['end_pressure'], '.0f', ' bar')}"
+        )
     if row.get("technical"):
         parts.append(f"technical dive ({row.get('tech_reason')})")
     if row.get("entered_deco"):
@@ -284,6 +348,34 @@ def dive_issues(row) -> list[str]:
         issues.append(
             f"DEEP DIVE: Maximum depth of {row['max_depth']:.1f}m. "
             f"Ensure you have appropriate training and gas planning for this depth."
+        )
+    profile = profile_flags(row)
+    if profile["low_reserve"]:
+        issues.append(
+            f"LOW GAS RESERVE: the last tank reading underwater was "
+            f"{row['end_pressure']:.0f} bar, below the usual {RESERVE_BAR:.0f} bar "
+            f"reserve. The log doesn't show the tank size or the plan."
+        )
+    if profile["short_stop"]:
+        issues.append(
+            f"SHORT SAFETY STOP: {row['safety_stop_minutes']:.1f} min between 3 and "
+            f"6 m before surfacing from {row['max_depth']:.1f} m (usual: "
+            f"{SAFETY_STOP_MIN:.0f} min at 5 m)."
+        )
+    if profile["surfaced_mid_dive"]:
+        issues.append(
+            f"SURFACED MID-DIVE: came up to the surface and went back down "
+            f"{int(row['mid_dive_surfacings'])} time(s)."
+        )
+    if profile["sawtooth"]:
+        issues.append(
+            f"SAWTOOTH PROFILE: {int(row['redescents'])} re-descents of "
+            f"{REDESCENT_M:.0f} m or more after ascending."
+        )
+    if profile["fast_descent"]:
+        issues.append(
+            f"FAST DESCENT: {row['max_descent_speed']:.1f} m/min averaged over "
+            f"{ASCENT_WINDOW_S:.0f} s, which leaves little time to equalize."
         )
     flags = thermal_flags(row)
     if flags["prolonged_cold"]:
@@ -454,6 +546,9 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
             "Safety Concerns:",
             *[f"  {line}" for line in concern_lines],
             "",
+            "Habits (share of the dives where each could be measured, most common first):",
+            *[f"  {line}" for line in habit_lines(features)],
+            "",
             f"Top Worst Offenders (sustained ascent, {ASCENT_WINDOW_S:.0f} s):",
             *_offenders("max_ascend_speed"),
             "",
@@ -477,6 +572,97 @@ def _deco_concerns(features: pd.DataFrame, n: int, pct) -> list[str]:
         f"Missed a required deco stop: {pct(int(flags['missed_stop'].sum()), n)}",
         f"Surfaced with deco still owed: {pct(int(flags['surfaced_owing'].sum()), n)}",
     ]
+
+
+def habit_counts(features: pd.DataFrame) -> list[tuple[str, int, int]]:
+    """(habit, dives showing it, dives where it could be measured).
+
+    Most common share first, habits no dive shows left out. Lets a reader
+    tell what the log keeps repeating from what happened once.
+    """
+    n = len(features)
+
+    def col(name: str) -> pd.Series:
+        return features[name] if name in features.columns else pd.Series(dtype=float)
+
+    deco = features.apply(deco_flags, axis=1, result_type="expand")
+    thermal = features.apply(thermal_flags, axis=1, result_type="expand")
+    profile = features.apply(profile_flags, axis=1, result_type="expand")
+    recreational = ~deco["technical"]
+    below_stop_depth = int((features["max_depth"] > STOP_EXPECTED_BELOW_M).sum())
+    low_ndl = (
+        recreational & ~deco["recreational_deco"] & (col("min_ndl") < NDL_DANGER_MIN)
+    )
+    temps = int(col("water_min_temp").notna().sum())
+    habits = [
+        (
+            f"ended below {RESERVE_BAR:.0f} bar",
+            int(profile["low_reserve"].sum()),
+            int((col("end_pressure").notna() & recreational).sum()),
+        ),
+        (
+            "entered deco on a recreational dive",
+            int(deco["recreational_deco"].sum()),
+            n,
+        ),
+        (
+            "missed a deco stop or surfaced owing one",
+            int((deco["missed_stop"] | deco["surfaced_owing"]).sum()),
+            n,
+        ),
+        (
+            f"NDL under {NDL_DANGER_MIN:.0f} min",
+            int(low_ndl.sum()),
+            int(col("min_ndl").notna().sum()),
+        ),
+        (
+            f"bolted to the surface (over {SHALLOW_ASCENT_LIMIT_M_MIN:.0f} m/min "
+            f"from the safety stop)",
+            int((col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN).sum()),
+            int(col("max_shallow_ascend_speed").notna().sum()),
+        ),
+        (
+            f"sustained ascent over {ASCENT_LIMIT_M_MIN:.0f} m/min",
+            int((col("max_ascend_speed") > ASCENT_LIMIT_M_MIN).sum()),
+            int(col("max_ascend_speed").notna().sum()),
+        ),
+        (
+            f"safety stop under {SAFETY_STOP_MIN:.0f} min",
+            int(profile["short_stop"].sum()),
+            int(col("safety_stop_minutes").notna().sum()),
+        ),
+        ("sawtooth profile", int(profile["sawtooth"].sum()), below_stop_depth),
+        (
+            "surfaced mid-dive",
+            int(profile["surfaced_mid_dive"].sum()),
+            below_stop_depth,
+        ),
+        (
+            f"descent over {FAST_DESCENT_M_MIN:.0f} m/min",
+            int(profile["fast_descent"].sum()),
+            int(col("max_descent_speed").notna().sum()),
+        ),
+        (
+            f"SAC over {SAC_HIGH_L_MIN:.0f} L/min",
+            int((col("sac_rate") > SAC_HIGH_L_MIN).sum()),
+            int(col("sac_rate").notna().sum()),
+        ),
+        (f"deeper than {DEEP_M:.0f} m", int((features["max_depth"] > DEEP_M).sum()), n),
+        ("prolonged cold", int(thermal["prolonged_cold"].sum()), temps),
+        ("cold stops", int(thermal["cold_stops"].sum()), temps),
+        ("long warm-water dive", int(thermal["long_warm"].sum()), temps),
+    ]
+    shown = [h for h in habits if h[1] > 0 and h[2] > 0]
+    return sorted(shown, key=lambda h: h[1] / h[2], reverse=True)
+
+
+def habit_lines(features: pd.DataFrame) -> list[str]:
+    """One line per habit the log shows, most common first."""
+    lines = [
+        f"{habit}: {count}/{of} dives ({count * 100 // of}%)"
+        for habit, count, of in habit_counts(features)
+    ]
+    return lines or ["none flagged"]
 
 
 def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
@@ -506,6 +692,13 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
         keywords.append("close to deco stop NDL almost zero recreational limit")
     if flags is not None and (flags["missed_stop"] | flags["surfaced_owing"]).any():
         keywords.append("missed decompression stop omitted deco surfaced")
+    profile = features.apply(profile_flags, axis=1, result_type="expand")
+    if profile["low_reserve"].any():
+        keywords.append("out of air low on gas running out of breathing gas")
+    if profile["short_stop"].any():
+        keywords.append("omitted safety stop")
+    if (profile["sawtooth"] | profile["surfaced_mid_dive"]).any():
+        keywords.append("sawtooth profile repeated ascents yo-yo diving")
     if (features["sac_rate"] > SAC_HIGH_L_MIN).any():
         keywords.append("high air consumption SAC rate breathing")
     if features["max_depth"].max() > DEEP_M:
