@@ -665,53 +665,84 @@ def habit_lines(features: pd.DataFrame) -> list[str]:
     return lines or ["none flagged"]
 
 
+# DAN is searched once per phrase and each search adds material to the turn,
+# so only the habits the log shows most are searched.
+MAX_ANOMALY_QUERIES = 6
+
+
 def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
     """One DAN search phrase per anomaly actually measured in the log.
 
-    NaN never triggers a phrase.
+    The most common anomalies come first and at most ``MAX_ANOMALY_QUERIES``
+    are kept, so the material follows what this log repeats. A missed or
+    skipped deco stop always leads. NaN never triggers a phrase.
     """
     if features is None or features.empty:
         return []
-    keywords: list[str] = []
-    if features["max_ascend_speed"].max() > ASCENT_LIMIT_M_MIN:
-        keywords.append("rapid ascent decompression sickness")
-    shallow = features.get("max_shallow_ascend_speed")
-    if shallow is not None and shallow.max() > SHALLOW_ASCENT_LIMIT_M_MIN:
-        keywords.append("fast final ascent to surface safety stop skipped")
-    flags = (
-        features.apply(deco_flags, axis=1, result_type="expand")
-        if "technical" in features.columns
-        else None
+
+    index = features.index
+    columns = {name: features[name] for name in features.columns}
+
+    def col(name: str) -> pd.Series:
+        return columns.get(name, pd.Series(float("nan"), index=index))
+
+    has_deco = "technical" in features.columns
+    deco = features.apply(deco_flags, axis=1, result_type="expand")
+    entered = (
+        deco["recreational_deco"]
+        if has_deco
+        else col("entered_deco").fillna(False).astype(bool)
     )
-    recreational_deco = (
-        flags["recreational_deco"].any()
-        if flags is not None
-        else "entered_deco" in features.columns and features["entered_deco"].any()
-    )
-    if recreational_deco or (features["min_ndl"] < 1).any():
-        keywords.append("close to deco stop NDL almost zero recreational limit")
-    if flags is not None and (flags["missed_stop"] | flags["surfaced_owing"]).any():
-        keywords.append("missed decompression stop omitted deco surfaced")
+    thermal = features.apply(thermal_flags, axis=1, result_type="expand")
     profile = features.apply(profile_flags, axis=1, result_type="expand")
-    if profile["low_reserve"].any():
-        keywords.append("out of air low on gas running out of breathing gas")
-    if profile["short_stop"].any():
-        keywords.append("omitted safety stop")
-    if (profile["sawtooth"] | profile["surfaced_mid_dive"]).any():
-        keywords.append("sawtooth profile repeated ascents yo-yo diving")
-    if (features["sac_rate"] > SAC_HIGH_L_MIN).any():
-        keywords.append("high air consumption SAC rate breathing")
-    if features["max_depth"].max() > DEEP_M:
-        keywords.append("deep diving incident")
-    if "cold_minutes" in features.columns:
-        flags = features.apply(thermal_flags, axis=1, result_type="expand")
-        if flags["prolonged_cold"].any():
-            keywords.append("hypothermia cold water exposure thermal protection")
-        if flags["cold_stops"].any():
-            keywords.append("cold during decompression thermal status DCS risk")
-        if flags["long_warm"].any():
-            keywords.append("dehydration warm water decompression sickness hydration")
-    return keywords
+    always = pd.Series(True, index=features.index)
+    never = pd.Series(False, index=features.index)
+    missed = deco["missed_stop"] | deco["surfaced_owing"] if has_deco else never
+    candidates = [
+        # A skipped stop leads however rare it is.
+        (
+            always if missed.any() else never,
+            "missed decompression stop omitted deco surfaced",
+        ),
+        (
+            col("max_ascend_speed") > ASCENT_LIMIT_M_MIN,
+            "rapid ascent decompression sickness",
+        ),
+        (
+            col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN,
+            "fast final ascent to surface safety stop skipped",
+        ),
+        (
+            entered | (col("min_ndl") < 1),
+            "close to deco stop NDL almost zero recreational limit",
+        ),
+        (
+            profile["low_reserve"],
+            "out of air low on gas running out of breathing gas",
+        ),
+        (profile["short_stop"], "omitted safety stop"),
+        (
+            profile["sawtooth"] | profile["surfaced_mid_dive"],
+            "sawtooth profile repeated ascents yo-yo diving",
+        ),
+        (col("sac_rate") > SAC_HIGH_L_MIN, "high air consumption SAC rate breathing"),
+        (features["max_depth"] > DEEP_M, "deep diving incident"),
+        (
+            thermal["prolonged_cold"],
+            "hypothermia cold water exposure thermal protection",
+        ),
+        (
+            thermal["cold_stops"],
+            "cold during decompression thermal status DCS risk",
+        ),
+        (
+            thermal["long_warm"],
+            "dehydration warm water decompression sickness hydration",
+        ),
+    ]
+    found = [(float(mask.mean()), phrase) for mask, phrase in candidates if mask.any()]
+    found.sort(key=lambda item: item[0], reverse=True)  # stable: ties keep this order
+    return [phrase for _, phrase in found[:MAX_ANOMALY_QUERIES]]
 
 
 def build_anomaly_keywords(features: pd.DataFrame | None) -> str:

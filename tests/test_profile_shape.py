@@ -231,3 +231,14 @@ def test_seed_context_carries_the_habits_line():
     context = agent.history[0].parts[0].text
     assert "ended below 50 bar: 3/4 dives (75%)" in context
     assert "ended below 50 bar" in agent.log_facts
+
+
+def test_anomaly_queries_follow_the_logs_most_common_habits():
+    from src.tools.dive import MAX_ANOMALY_QUERIES
+
+    queries = anomaly_queries(extract_features(_log()))
+    # 3 of 4 dives end low on gas; 1 of 4 skips the stop.
+    assert queries.index("out of air low on gas running out of breathing gas") < (
+        queries.index("omitted safety stop")
+    )
+    assert len(queries) <= MAX_ANOMALY_QUERIES
