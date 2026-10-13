@@ -66,10 +66,9 @@ def test_agent_keywords_rapid_ascent():
     assert "rapid ascent decompression sickness" in kw
 
 
-def test_agent_keywords_low_ndl():
+def test_agent_keywords_low_ndl_is_a_fact_not_an_anomaly():
     agent = _make_agent(_make_features(min_ndl=0.5))
-    kw = agent._build_anomaly_keywords()
-    assert "close to deco stop NDL almost zero recreational limit" in kw
+    assert agent._build_anomaly_keywords() == ""
 
 
 def test_agent_keywords_air_consumption_is_a_fact_not_an_anomaly():
@@ -107,7 +106,7 @@ def test_agent_keywords_multiple_anomalies():
     )
     kw = agent._build_anomaly_keywords()
     assert "rapid ascent decompression sickness" in kw
-    assert "close to deco stop" in kw
+    assert "close to deco stop" not in kw
     assert "air consumption" not in kw
     assert "deep diving" not in kw
 

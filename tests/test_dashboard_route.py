@@ -73,9 +73,9 @@ class TestComputeDangerScore:
             "max_depth": 38,
         }
         score = _compute_danger_score(row)
-        # Ascent limit broken: 2*2=4. NDL under 5 min is a thin margin: 2.
-        # Air consumption and depth on their own are facts: 0.
-        assert score == 6.0
+        # Ascent limit broken: 2*2=4. A low NDL, air consumption and depth on
+        # their own are facts: 0.
+        assert score == 4.0
 
     def test_warning_level(self):
         row = {
@@ -85,8 +85,8 @@ class TestComputeDangerScore:
             "max_depth": 25,
         }
         score = _compute_danger_score(row)
-        # Ascent near the limit: 2. NDL under 10 min, a thin margin: 1.
-        assert score == 3.0
+        # Ascent near the limit: 2. Nothing else here is a finding.
+        assert score == 2.0
 
     def test_a_deep_dive_inside_its_gas_limits_scores_nothing(self):
         deep = {"max_depth": 38, "max_po2": 1.01, "gas_density": 6.1, "min_ndl": 20}
@@ -132,8 +132,8 @@ class TestIdentifyIssues:
             "sac_rate": 22,
             "max_depth": 35,
         }
-        # Limits first, then margins; air consumption and depth are facts.
-        assert _identify_issues(row) == ["rapid ascent", "low NDL"]
+        # A low NDL, air consumption and depth are facts, not issues.
+        assert _identify_issues(row) == ["rapid ascent"]
 
 
 class TestPickOrder:

@@ -174,7 +174,7 @@ export function SingleDiveView({ dive, features, metrics }: Props) {
           <Stat
             label={METRICS.ndl.name}
             value={features.entered_deco ? "entered deco" : fmtValue(features.min_ndl, 0, "min")}
-            zone={features.entered_deco ? "warning" : zone("ndl")}
+            zone={zone("ndl")}
           />
           <Stat label={METRICS.sac.name} value={fmtValue(features.sac_rate, 1, "L/min")} zone={zone("sac")} />
           <Stat label={METRICS.temp.name} qualifier="average" value={fmtValue(features.avg_temp, 1, "°C")} />

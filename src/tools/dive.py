@@ -137,7 +137,8 @@ def profile_flags(row) -> dict[str, bool]:
 #             past the researched 6.2 g/L maximum, yet inside what every
 #             agency trains divers to do.
 #   everything else is descriptive (depth on its own, air consumption,
-#   temperature, descent rate): a fact about the diver, with no good or bad.
+#   temperature, descent rate, a low NDL, deco with the stops kept): a fact
+#   about the diver, with no good or bad.
 LIMIT = "limit"
 MARGIN = "margin"
 RECREATIONAL_MAX_M = 40.0  # beyond the range recreational training covers
@@ -173,7 +174,6 @@ def dive_findings(row) -> dict[str, tuple[str, float]]:
     deco = deco_flags(row)
     gas = gas_flags(row)
     profile = profile_flags(row)
-    ndl = row.get("min_ndl")
     ascent = row.get("max_ascend_speed")
     surfacing = row.get("max_shallow_ascend_speed")
 
@@ -193,14 +193,9 @@ def dive_findings(row) -> dict[str, tuple[str, float]]:
     elif measured(surfacing) and surfacing > SHALLOW_ASCENT_LIMIT_M_MIN:
         found["bolted to surface"] = (LIMIT, 2.0)
 
-    # Margins. A technical dive plans its deco, so deco entry and low NDL
-    # only count on a recreational dive, and not once a stop was missed.
-    if "missed deco stop" in found or deco["technical"]:
-        pass
-    elif row.get("entered_deco") or (measured(ndl) and ndl < NDL_DANGER_MIN):
-        found["low NDL"] = (MARGIN, 2.0)
-    elif measured(ndl) and ndl < NDL_MARGIN_MIN:
-        found["low NDL"] = (MARGIN, 1.0)
+    # Margins. Running the NDL down, or going into deco and keeping the
+    # stops, is not one of them: nothing was cut close that the computer
+    # didn't then have the diver pay back at the stops.
     if profile["low_reserve"]:
         thin = row["end_pressure"] < RESERVE_THIN_BAR
         found["low gas reserve"] = (MARGIN, 2.0 if thin else 1.0)
@@ -434,15 +429,6 @@ def dive_issues(row) -> list[str]:
             f"rebreather in the log): {fmt(row.get('deco_minutes'), '.0f', ' min')} "
             f"of deco obligation.{kept}"
         )
-    elif (
-        not row.get("entered_deco")
-        and measured(row.get("min_ndl"))
-        and row["min_ndl"] < NDL_DANGER_MIN
-    ):
-        issues.append(
-            f"THIN MARGIN, LOW NDL: Minimum NDL dropped to {row['min_ndl']:.0f} minutes, "
-            f"close to mandatory decompression but inside the no-stop limit."
-        )
     gas = gas_flags(row)
     if gas["po2_over_working"]:
         over = (
@@ -625,7 +611,7 @@ def analyze_all_dives(df: pd.DataFrame, features: pd.DataFrame | None = None) ->
         f"the last {SHALLOW_ZONE_M:.0f} m): "
         f"{_pct(int((surfacing > SHALLOW_ASCENT_LIMIT_M_MIN).sum()), n)}",
         *_deco_concerns(features, n, _pct),
-        f"NDL under {NDL_DANGER_MIN:.0f} min (a thin margin, not a limit broken): "
+        f"NDL under {NDL_DANGER_MIN:.0f} min (a fact, no limit broken): "
         f"{_pct(int((ndl < NDL_DANGER_MIN).sum()), cov['ndl'], 'dives with NDL')}",
     ]
     if "cold_minutes" in features.columns:
@@ -752,18 +738,6 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
         ),
         (
             MARGIN,
-            "entered deco on a recreational dive",
-            count(deco["recreational_deco"]),
-            n,
-        ),
-        (
-            MARGIN,
-            f"NDL under {NDL_DANGER_MIN:.0f} min",
-            count(low_ndl),
-            count(col("min_ndl").notna()),
-        ),
-        (
-            MARGIN,
             f"safety stop under {SAFETY_STOP_MIN:.0f} min",
             count(profile["short_stop"]),
             count(col("safety_stop_minutes").notna()),
@@ -790,6 +764,18 @@ def habit_counts(features: pd.DataFrame) -> list[tuple[str, str, int, int]]:
         ),
         (MARGIN, "prolonged cold", count(thermal["prolonged_cold"]), temps),
         (MARGIN, "cold stops", count(thermal["cold_stops"]), temps),
+        (
+            FACT,
+            "went into deco on a recreational dive and kept the stops",
+            count(deco["recreational_deco"] & deco["stops_kept"]),
+            n,
+        ),
+        (
+            FACT,
+            f"NDL under {NDL_DANGER_MIN:.0f} min",
+            count(low_ndl),
+            count(col("min_ndl").notna()),
+        ),
         (FACT, f"deeper than {DEEP_M:.0f} m", count(features["max_depth"] > DEEP_M), n),
         (
             FACT,
@@ -852,11 +838,6 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
 
     has_deco = "technical" in features.columns
     deco = features.apply(deco_flags, axis=1, result_type="expand")
-    entered = (
-        deco["recreational_deco"]
-        if has_deco
-        else col("entered_deco").fillna(False).astype(bool)
-    )
     thermal = features.apply(thermal_flags, axis=1, result_type="expand")
     profile = features.apply(profile_flags, axis=1, result_type="expand")
     gas = features.apply(gas_flags, axis=1, result_type="expand")
@@ -876,10 +857,6 @@ def anomaly_queries(features: pd.DataFrame | None) -> list[str]:
         (
             col("max_shallow_ascend_speed") > SHALLOW_ASCENT_LIMIT_M_MIN,
             "fast final ascent to surface safety stop skipped",
-        ),
-        (
-            entered | (col("min_ndl") < 1),
-            "close to deco stop NDL almost zero recreational limit",
         ),
         (
             profile["low_reserve"],

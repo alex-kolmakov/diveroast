@@ -49,7 +49,7 @@ function MetricPanel({
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="text-xs text-muted-foreground">{note}</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
         {metrics.map((metric) => (
           <Card key={metric.label}>
             <CardContent className="px-4 pt-4">

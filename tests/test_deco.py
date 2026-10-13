@@ -129,10 +129,11 @@ def test_dashboard_scores_adherence_not_deco_entry():
     kept = _row()
     tech = _row(helium=30.0)
     missed = _row(stop_m=6.0, hold_at=3.5)
-    assert _compute_danger_score(tech) < _compute_danger_score(kept)
+    # Going into deco and keeping the stops scores nothing, planned or not.
+    assert _compute_danger_score(tech) == _compute_danger_score(kept)
     assert _compute_danger_score(missed) > _compute_danger_score(kept)
-    assert "low NDL" in _identify_issues(kept)
-    assert "low NDL" not in _identify_issues(tech)
+    assert "low NDL" not in _identify_issues(kept)
+    assert _identify_issues(kept) == _identify_issues(tech)
     assert "missed deco stop" in _identify_issues(missed)
 
 

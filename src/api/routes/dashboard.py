@@ -91,7 +91,6 @@ PICK_REASONS = {
     "oxygen pressure": "Highest oxygen pressure at depth",
     "bolted to surface": "Fastest bolt to the surface",
     "rapid ascent": "Fastest ascent rate",
-    "low NDL": "Closest to decompression limit",
     "low gas reserve": "Lowest gas reserve",
     "short safety stop": "Shortest safety stop",
     "surfaced mid-dive": "Surfaced mid-dive and went back down",
@@ -103,13 +102,13 @@ PICK_REASONS = {
 # Which metric to rank by for each finding (and whether higher or lower is
 # worse). Limits come before margins: the order breaks ties between findings
 # whose worst dives score the same. Descriptive facts (depth on its own, air
-# consumption) are never a reason to pick a dive.
+# consumption, a low NDL, deco with the stops kept) are never a reason to
+# pick a dive.
 ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
     "missed deco stop": ("missed_stop_minutes", True),  # higher is worse
     "oxygen pressure": ("max_po2", True),  # higher is worse
     "bolted to surface": ("max_shallow_ascend_speed", True),  # higher is worse
     "rapid ascent": ("max_ascend_speed", True),  # higher is worse
-    "low NDL": ("ndl_rank", False),  # lower is closer; deco entry ranks lowest
     "low gas reserve": ("end_pressure", False),  # lower is closer
     "short safety stop": ("safety_stop_minutes", False),  # lower is closer
     "surfaced mid-dive": ("mid_dive_surfacings", True),  # higher is worse
@@ -120,8 +119,6 @@ ISSUE_RANK_KEY: dict[str, tuple[str, bool]] = {
 
 # Findings that are the same story told twice: only one of each gets a card.
 ISSUE_FAMILY = {
-    "missed deco stop": "deco",
-    "low NDL": "deco",
     "bolted to surface": "ascent",
     "rapid ascent": "ascent",
     "oxygen pressure": "gas at depth",
@@ -590,14 +587,6 @@ def _build_dashboard(
 ) -> DashboardResponse:
     """Compute the dashboard for the session's log (blocking: runs in a thread)."""
     features_df = extract_features(dive_data)
-    # Rank key for the "low NDL" pick: a deco entry is worse than any NDL.
-    # Technical dives plan their deco, so they're left out of this pick.
-    features_df["ndl_rank"] = (
-        features_df["min_ndl"]
-        .where(~features_df["entered_deco"], -1.0)
-        .where(~features_df["technical"])
-    )
-
     # Build per-dive features list
     all_dives = []
     for _, row in features_df.iterrows():
