@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Award, MapPin, Waves, Anchor } from "lucide-react";
 import { DashboardHeader } from "@/components/DashboardHeader";
-import { DecoStopsGauge, RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
+import { StopsGauge, RangeGauge, TemperatureGauge } from "@/components/RangeGauge";
 import { AgentRoastSummary } from "@/components/AgentRoastSummary";
 import { ProblematicDiveCard } from "@/components/ProblematicDiveCard";
 import { DonationNotice } from "@/components/DonationNotice";
@@ -138,7 +138,7 @@ export function Dashboard({ data, messages = [], isLoading = false, onToggleChat
               title="Limits"
               note="Lines any diver is held to. Red is a limit broken."
               metrics={data.metrics.filter((m) => !isDescriptive(m))}
-              extra={<DecoStopsGauge dives={data.all_dives} />}
+              extra={<StopsGauge dives={data.all_dives} />}
             />
 
             {worst.length > 0 && (

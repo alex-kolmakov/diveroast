@@ -45,6 +45,9 @@ function coverage(metric: MetricRange): string | null {
   return `recorded for ${metric.recorded}/${metric.total} dives`;
 }
 
+const MAX_DIVIDED_SEGMENTS = 40;
+const SEGMENT_DIVIDER = "1px solid oklch(0.13 0.03 230 / 50%)";
+
 /** One equal-width segment per dive, highlighted on hover. */
 function DiveBar({
   dives,
@@ -60,6 +63,9 @@ function DiveBar({
   children?: React.ReactNode;
 }) {
   const segmentWidth = 100 / dives.length;
+  // Hairlines between dives only while a segment is wide enough to carry one:
+  // on a long log they blur into a dull, striped bar.
+  const divided = dives.length <= MAX_DIVIDED_SEGMENTS;
   return (
     <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
       {dives.map((dive, i) => {
@@ -76,7 +82,7 @@ function DiveBar({
               left: `${i * segmentWidth}%`,
               width: `${segmentWidth}%`,
               background,
-              borderRight: i < dives.length - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
+              borderRight: divided && i < dives.length - 1 ? SEGMENT_DIVIDER : "none",
             }}
             onMouseEnter={() => onHover(dive)}
             onMouseLeave={() => onHover(null)}
@@ -242,47 +248,93 @@ function DescriptiveGauge({ metric }: Props) {
   );
 }
 
+const SAFETY_STOP_MIN = 3; // the usual safety stop: 3 min at 5 m
+
+type StopState = "kept" | "short" | "missed" | "unknown";
+const STOP_COLORS: Record<StopState, string> = {
+  kept: "bg-safe",
+  short: "bg-warning",
+  missed: "bg-danger",
+  unknown: "bg-muted",
+};
+const STOP_ORDER: StopState[] = ["kept", "unknown", "short", "missed"];
+
 /**
- * Deco as a limit: going into deco breaks nothing, not keeping a required
- * stop does. One segment per recreational dive that went into deco.
- * Technical dives plan their deco and only show up if they missed a stop.
+ * How a dive ended its ascent. A required deco stop not kept is a limit
+ * broken (red). A safety stop is a recommendation, so a short one is a thin
+ * margin (amber). Going into deco and keeping the stops is simply kept.
+ * null for a dive too shallow to expect a stop.
  */
-export function DecoStopsGauge({ dives }: { dives: DiveFeature[] }) {
-  const missedStop = (d: DiveFeature) =>
-    (d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0;
-  const deco = dives.filter((d) => missedStop(d) || (d.entered_deco && !d.technical));
-  const missed = deco.filter(missedStop).length;
-  const unknown = deco.filter((d) => !missedStop(d) && d.missed_stop_minutes == null).length;
-  const name = METRICS.decoStops.name;
-  const dive = (n: number) => `${n} ${n === 1 ? "dive" : "dives"}`;
+function stopState(d: DiveFeature): StopState | null {
+  if ((d.missed_stop_minutes ?? 0) >= MISSED_STOP_MIN || (d.surfaced_owing ?? 0) > 0) return "missed";
+  if (d.entered_deco) return d.missed_stop_minutes == null ? "unknown" : "kept";
+  if (d.safety_stop_minutes == null) return null;
+  return d.safety_stop_minutes < SAFETY_STOP_MIN ? "short" : "kept";
+}
+
+/** Safety and deco stops, one segment per dive deep enough to expect one. */
+export function StopsGauge({ dives }: { dives: DiveFeature[] }) {
+  const [hovered, setHovered] = useState<{ dive: DiveFeature; state: StopState } | null>(null);
+  const stops = dives
+    .map((dive) => ({ dive, state: stopState(dive) }))
+    .filter((s): s is { dive: DiveFeature; state: StopState } => s.state !== null)
+    .sort((a, b) => STOP_ORDER.indexOf(a.state) - STOP_ORDER.indexOf(b.state));
+  const count = (state: StopState) => stops.filter((s) => s.state === state).length;
+  const missed = count("missed");
+  const short = count("short");
+  const deco = dives.filter((d) => d.entered_deco).length;
+  const divided = stops.length <= MAX_DIVIDED_SEGMENTS;
+  const describe = (s: { dive: DiveFeature; state: StopState }) =>
+    s.state === "missed"
+      ? "required deco stop not kept"
+      : s.state === "unknown"
+        ? "went into deco, stops not recorded"
+        : s.dive.entered_deco
+          ? "deco stops kept"
+          : `safety stop ${s.dive.safety_stop_minutes?.toFixed(1)} min`;
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-x-2">
-        <span className="text-sm font-medium">{name}</span>
-        <span className={`shrink-0 text-sm font-semibold ${missed > 0 ? "text-danger" : "text-safe"}`}>
-          {missed > 0 ? `${missed} not kept` : deco.length > 0 ? "all kept" : "–"}
+        <span className="text-sm font-medium">{METRICS.stops.name}</span>
+        <span
+          className={`shrink-0 text-sm font-semibold ${
+            missed > 0 ? "text-danger" : short > 0 ? "text-warning" : "text-safe"
+          }`}
+        >
+          {stops.length === 0
+            ? "–"
+            : missed > 0
+              ? `${missed} deco ${missed === 1 ? "stop" : "stops"} missed`
+              : short > 0
+                ? `${short} short`
+                : "all kept"}
         </span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
-        <span>{deco.length > 0 ? `${dive(deco.length)} went into deco` : "no dive went into deco"}</span>
-        {missed > 0 && <span className="shrink-0 font-semibold text-danger">{missed} over limit</span>}
+        <span>
+          {stops.length} dives deeper than 10 m{deco > 0 && ` · ${deco} went into deco`}
+        </span>
+        {missed > 0 && short > 0 && <span className="shrink-0 font-semibold text-warning">{short} short</span>}
       </div>
 
-      {deco.length > 0 ? (
+      {stops.length > 0 ? (
         <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted/50">
-          {deco.map((d, i) => (
+          {stops.map((s, i) => (
             <div
-              key={d.dive_number}
-              title={`Dive #${d.dive_number}`}
-              className={`absolute inset-y-0 opacity-80 ${
-                missedStop(d) ? "bg-danger" : d.missed_stop_minutes == null ? "bg-muted" : "bg-safe"
+              key={s.dive.dive_number}
+              className={`absolute inset-y-0 transition-opacity ${STOP_COLORS[s.state]} ${
+                hovered && hovered.dive.dive_number !== s.dive.dive_number
+                  ? "opacity-40"
+                  : "opacity-80 hover:opacity-100"
               }`}
               style={{
-                left: `${(i * 100) / deco.length}%`,
-                width: `${100 / deco.length}%`,
-                borderRight: i < deco.length - 1 ? "1px solid oklch(0.13 0.03 230 / 50%)" : "none",
+                left: `${(i * 100) / stops.length}%`,
+                width: `${100 / stops.length}%`,
+                borderRight: divided && i < stops.length - 1 ? SEGMENT_DIVIDER : "none",
               }}
+              onMouseEnter={() => setHovered(s)}
+              onMouseLeave={() => setHovered(null)}
             />
           ))}
         </div>
@@ -291,8 +343,16 @@ export function DecoStopsGauge({ dives }: { dives: DiveFeature[] }) {
       )}
 
       <div className="text-xs text-muted-foreground">
-        {METRICS.decoStops.qualifier} · going into deco breaks no limit, skipping a required stop does
-        {unknown > 0 && ` · stops not recorded for ${unknown}`}
+        {hovered ? (
+          <span>
+            Dive #{hovered.dive.dive_number}: {describe(hovered)}
+          </span>
+        ) : (
+          <span>
+            safety stop under {SAFETY_STOP_MIN} min is a thin margin (amber) · a required deco stop not kept
+            is a limit broken (red)
+          </span>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ export const METRICS = {
   po2: { name: "Oxygen pressure", qualifier: "at the deepest point, for the gas breathed" },
   density: { name: "Gas density", qualifier: "at the deepest point" },
   backDown: { name: "Re-descents", qualifier: "metres back down after coming up, on dives deeper than 10 m" },
-  decoStops: { name: "Deco stops", qualifier: "required stops not kept" },
+  stops: { name: "Stops", qualifier: "safety and deco stops" },
 } as const;
 
 export type MetricKind = keyof typeof METRICS;
