@@ -136,7 +136,13 @@ def format_results(results: pd.DataFrame) -> Retrieval:
         chunks.append(f"{header}\n{row['value']}")
         if url and url not in seen:
             seen.add(url)
-            sources.append({"title": title or url, "url": url})
+            source = {"title": title or url, "url": url}
+            # Missing in an index built before the column existed (None or
+            # NaN here): only a real YYYY-MM-DD gives a year.
+            published = row.get("published")
+            if isinstance(published, str) and published[:4].isdigit():
+                source["year"] = published[:4]
+            sources.append(source)
     return Retrieval(text="\n\n".join(chunks), sources=sources)
 
 

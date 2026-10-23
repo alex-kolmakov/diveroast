@@ -210,7 +210,12 @@ async def test_roast_is_saved_server_side(api):
         assert shared["roast_summary"] == "Your ascents need work."
         assert shared["roast_prompt"] == "sharp-ironic-analyst (v4)"
         assert shared["roast_sources"] == [
-            {"title": "Ascent", "url": "https://dan.org/a", "cited": False}
+            {
+                "title": "Ascent",
+                "url": "https://dan.org/a",
+                "year": None,
+                "cited": False,
+            }
         ]
 
 

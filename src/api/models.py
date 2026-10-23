@@ -181,6 +181,7 @@ class Source(BaseModel):
 
     title: str
     url: str
+    year: str | None = None  # first published; None for an older index
     cited: bool = False
 
 

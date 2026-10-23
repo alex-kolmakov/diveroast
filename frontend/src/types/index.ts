@@ -1,6 +1,7 @@
 export interface Source {
   title: string;
   url: string;
+  year?: string | null; // first published (absent in older snapshots)
   cited?: boolean; // the answer links to it (absent in older snapshots)
 }
 

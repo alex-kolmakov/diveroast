@@ -100,6 +100,23 @@ def test_format_results_cites_sources():
     ]
 
 
+def test_format_results_gives_sources_their_year():
+    results = pd.DataFrame(
+        {
+            "value": ["Ascend slowly.", "Stop at 5 m.", "Other"],
+            "title": ["Ascent Rates", "Safety Stops", "Undated"],
+            "url": ["https://dan.org/a", "https://dan.org/b", "https://dan.org/c"],
+            "published": ["2019-03-04", "2024-11-30", None],
+            "_relevance_score": [2.0, 1.0, 0.5],
+        }
+    )
+    assert format_results(results).sources == [
+        {"title": "Ascent Rates", "url": "https://dan.org/a", "year": "2019"},
+        {"title": "Safety Stops", "url": "https://dan.org/b", "year": "2024"},
+        {"title": "Undated", "url": "https://dan.org/c"},
+    ]
+
+
 def test_describe_features():
     row = {
         "avg_depth": 15.8,

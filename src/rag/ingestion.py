@@ -171,9 +171,18 @@ def dan_articles(article):
         _chunk_count,
     )
     url = article.get("link", "")
+    # First publication (YYYY-MM-DD), for the year in a citation. Not
+    # `modified`: DAN re-saves old articles, which would make them look new.
+    published = str(article.get("date") or "")[:10]
     for i, chunk in enumerate(chunks):
         chunk_id = hashlib.md5(f"{url}::{i}".encode()).hexdigest()
-        yield {"chunk_id": chunk_id, "value": chunk, "title": title, "url": url}
+        yield {
+            "chunk_id": chunk_id,
+            "value": chunk,
+            "title": title,
+            "url": url,
+            "published": published,
+        }
 
 
 def run_pipeline(full_replace: bool = False):
