@@ -4,6 +4,12 @@ import { uploadDiveLog } from "@/services/api";
 import { RETENTION_DAYS } from "@/lib/consent";
 import type { UploadResponse } from "@/types";
 
+const EXTENSIONS = [".ssrf", ".xml", ".uddf", ".fit", ".zip"];
+// Phone pickers filter by MIME type, and .ssrf, .uddf and .fit have none, so
+// an `accept` list greys those files out. Phones get no filter; the
+// extension is checked once a file is picked.
+const PICKER_ACCEPT = window.matchMedia("(pointer: coarse)").matches ? undefined : EXTENSIONS.join(",");
+
 interface Props {
   onUploadComplete: (response: UploadResponse) => void;
 }
@@ -16,6 +22,10 @@ export function UploadScreen({ onUploadComplete }: Props) {
 
   const handleFile = useCallback(
     async (file: File) => {
+      if (!EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+        setError(`${file.name} isn't a dive log DiveRoast can read. Pick a Subsurface .ssrf, UDDF, Garmin .fit or .zip file.`);
+        return;
+      }
       setIsUploading(true);
       setError(null);
       try {
@@ -43,6 +53,8 @@ export function UploadScreen({ onUploadComplete }: Props) {
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      // Cleared so picking the same file again after an error fires again
+      e.target.value = "";
       if (file) handleFile(file);
     },
     [handleFile]
@@ -77,7 +89,7 @@ export function UploadScreen({ onUploadComplete }: Props) {
         <input
           id="file-input"
           type="file"
-          accept=".ssrf,.xml,.uddf,.fit,.zip"
+          accept={PICKER_ACCEPT}
           onChange={handleChange}
           className="hidden"
         />
