@@ -127,11 +127,11 @@ def extract_all_dive_profiles_refined(root):
                 if "temp" in sample.attrib
                 else None
             )
-            pressure = (
-                sample.attrib.get("pressure", "N/A").replace(" bar", "")
-                if "pressure" in sample.attrib
-                else None
-            )
+            # The first tank sensor: `pressure` in older Subsurface, `pressure0`
+            # since sensors were numbered (more tanks are pressure1, 2, ...).
+            pressure = sample.attrib.get("pressure", sample.attrib.get("pressure0"))
+            if pressure is not None:
+                pressure = pressure.replace(" bar", "")
             rbt = (
                 sample.attrib.get("rbt", "N/A").replace(":00 min", "")
                 if "rbt" in sample.attrib

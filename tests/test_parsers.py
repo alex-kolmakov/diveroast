@@ -51,6 +51,21 @@ def test_extract_all_dive_profiles_refined():
     assert df["time"].iloc[200] == 720
 
 
+@pytest.mark.parametrize("attribute", ["pressure", "pressure0"])
+def test_tank_pressure_read_from_old_and_numbered_attributes(attribute):
+    """Newer Subsurface writes the first tank sensor as pressure0."""
+    root = ET.fromstring(
+        "<divelog><dives><dive number='1'><divecomputer>"
+        f"<sample time='0:10 min' depth='5.0 m' {attribute}='200.5 bar' />"
+        "<sample time='0:20 min' depth='5.0 m' pressure1='180.0 bar' />"
+        "</divecomputer></dive></dives></divelog>"
+    )
+    df = extract_all_dive_profiles_refined(root)
+    assert df["pressure"].iloc[0] == 200.5
+    # A second tank's sensor is not the first tank's reading
+    assert df["pressure"].isna().iloc[1]
+
+
 def test_get_parser_ssrf():
     parser = get_parser("dive_export.ssrf")
     assert parser.__class__.__name__ == "SubsurfaceParser"
